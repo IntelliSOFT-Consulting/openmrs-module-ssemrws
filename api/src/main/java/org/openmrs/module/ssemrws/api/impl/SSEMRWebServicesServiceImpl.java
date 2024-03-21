@@ -15,8 +15,12 @@ import org.openmrs.api.impl.BaseOpenmrsService;
 import org.openmrs.module.ssemrws.Item;
 import org.openmrs.module.ssemrws.api.SSEMRWebServicesService;
 import org.openmrs.module.ssemrws.api.dao.SSEMRWebServicesDao;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SSEMRWebServicesServiceImpl extends BaseOpenmrsService implements SSEMRWebServicesService {
+	
+	private static final Logger LOGGER = LoggerFactory.getLogger(SSEMRWebServicesServiceImpl.class);
 	
 	SSEMRWebServicesDao dao;
 	
@@ -46,7 +50,7 @@ public class SSEMRWebServicesServiceImpl extends BaseOpenmrsService implements S
 		if (item.getOwner() == null) {
 			item.setOwner(userService.getUser(1));
 		}
-		
+		LOGGER.info("saving into database using dao");
 		return dao.saveItem(item);
 	}
 }

@@ -66,10 +66,7 @@ public class SSEMRWebServicesController {
 	// Create Enum of the following filter categories: CHILDREN_ADOLESCENTS,
 	// PREGNANT_BREASTFEEDING, RETURN_FROM_IIT, RETURN_TO_TREATMENT
 	public enum filterCategory {
-		CHILDREN_ADOLESCENTS,
-		PREGNANT_BREASTFEEDING,
-		RETURN_FROM_IIT,
-		RETURN_TO_TREATMENT
+		CHILDREN_ADOLESCENTS, PREGNANT_BREASTFEEDING, RETURN_FROM_IIT, RETURN_TO_TREATMENT
 	};
 	
 	public static final String ENROLMENT_ENCOUNTER_TYPE_UUID = "f469b65f-a4f6-4723-989a-46090de6a0e5";
@@ -118,8 +115,8 @@ public class SSEMRWebServicesController {
 			Visit patientVisit = activeVisits.get(0);
 			
 			/**
-			 * {uuid: string; encounterType?: EncounterType; name: string; display: string; version: string;
-			 * published: boolean; retired: boolean;}
+			 * {uuid: string; encounterType?: EncounterType; name: string; display: string; version:
+			 * string; published: boolean; retired: boolean;}
 			 */
 			
 			/*
@@ -167,8 +164,8 @@ public class SSEMRWebServicesController {
 	// gets all visit forms for a patient
 	@ResponseBody
 	public Object getAllPatients(HttpServletRequest request, @RequestParam("startDate") String qStartDate,
-	        @RequestParam("endDate") String qEndDate,
-	        @RequestParam(required = false, value = "filter") filterCategory filterCategory) throws ParseException {
+			@RequestParam("endDate") String qEndDate,
+			@RequestParam(required = false, value = "filter") filterCategory filterCategory) throws ParseException {
 		Date startDate = dateTimeFormatter.parse(qStartDate);
 		Date endDate = dateTimeFormatter.parse(qEndDate);
 		List<Patient> allPatients = Context.getPatientService().getAllPatients(false);
@@ -235,7 +232,7 @@ public class SSEMRWebServicesController {
 	public Object getPatientsReturnedToTreatment(HttpServletRequest request) {
 		List<Patient> allPatients = Context.getPatientService().getAllPatients(false);
 		// Add logic to filter patients who have returned to treatment
-		
+
 		return generatePatientListObj(new HashSet<>(allPatients));
 	}
 	
@@ -272,63 +269,64 @@ public class SSEMRWebServicesController {
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/viralLoadSamplesCollected")
 	@ResponseBody
 	public Object getViralLoadSamplesCollected(HttpServletRequest request,
-	        @RequestParam(value = "startDate") String qStartDate, @RequestParam(value = "endDate") String qEndDate,
-	        @RequestParam(required = false, value = "filter") filterCategory filterCategory) {
+			@RequestParam(value = "startDate") String qStartDate, @RequestParam(value = "endDate") String qEndDate,
+			@RequestParam(required = false, value = "filter") filterCategory filterCategory) {
 		ObjectNode simpleObject = JsonNodeFactory.instance.objectNode();
 		try {
 			Date startDate = dateTimeFormatter.parse(qStartDate);
 			Date endDate = dateTimeFormatter.parse(qEndDate);
-			
+
 			EncounterType viralLoadEncounterType = Context.getEncounterService()
-			        .getEncounterTypeByUuid(VL_LAB_REQUEST_ENCOUNTER_TYPE);
-			EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, null, endDate, null,
-			        null, Collections.singletonList(viralLoadEncounterType), null, null, null, false);
-			List<Encounter> viralLoadSampleEncounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
-			
+					.getEncounterTypeByUuid(VL_LAB_REQUEST_ENCOUNTER_TYPE);
+			EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, null, endDate,
+					null, null, Collections.singletonList(viralLoadEncounterType), null, null, null, false);
+			List<Encounter> viralLoadSampleEncounters = Context.getEncounterService()
+					.getEncounters(encounterSearchCriteria);
+
 			// get the date of sample collection from the obs in the viral load encounters
-			Concept sampleCollectionDateConcept = Context.getConceptService().getConceptByUuid(SAMPLE_COLLECTION_DATE_UUID);
+			Concept sampleCollectionDateConcept = Context.getConceptService()
+					.getConceptByUuid(SAMPLE_COLLECTION_DATE_UUID);
 			List<Obs> sampleCollectionDateObs = Context.getObsService().getObservations(null, viralLoadSampleEncounters,
-			    Collections.singletonList(sampleCollectionDateConcept), null, null, null, null, null, null, null, endDate,
-			    false);
-			
+					Collections.singletonList(sampleCollectionDateConcept), null, null, null, null, null, null, null,
+					endDate, false);
+
 			simpleObject = generateDashboardSummaryFromObs(startDate, endDate, sampleCollectionDateObs, null);
-			
+
 			return simpleObject;
-			
-		}
-		catch (APIException | ParseException e) {
+
+		} catch (APIException | ParseException e) {
 			throw new RuntimeException(e);
 		}
 	}
 	
 	private static ObjectNode generateDashboardSummaryFromObs(Date startDate, Date endDate, List<Obs> obsList,
-	        filterCategory filterCategory) {
+			filterCategory filterCategory) {
 		// TODO: Implement filter category logic
-		
+
 		ObjectNode simpleObject = JsonNodeFactory.instance.objectNode();
 		// Instantiate an array with all months of the year
-		String[] months = new String[] { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-		        "Dec" };
-		
+		String[] months = new String[]{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+				"Dec"};
+
 		// Instantiate an array with all days of the week
-		String[] days = new String[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-		
+		String[] days = new String[]{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
+
 		HashMap<String, List<Person>> monthlyGrouping = new HashMap<>();
 		HashMap<String, Integer> weeklySummary = new HashMap<>();
 		HashMap<String, Integer> monthlySummary = new HashMap<>();
 		HashMap<String, Integer> dailySummary = new HashMap<>();
-		
+
 		// For each obs in the obsList, filter Value Datetime that falls between the
 		// start date and end date
 		for (Obs obs : obsList) {
 			if (obs.getValueDate().after(DateUtils.addDays(startDate, -1))
-			        && obs.getValueDate().before(DateUtils.addDays(endDate, 1))) {
+					&& obs.getValueDate().before(DateUtils.addDays(endDate, 1))) {
 				// Add logic to group the data by month and week and day and calculate counts
 				// for each group
 				Calendar calendar = Calendar.getInstance();
 				calendar.setTime(obs.getValueDate());
 				String month = months[calendar.get(Calendar.MONTH)];
-				
+
 				if (monthlyGrouping.containsKey(month)) {
 					// check if person already exists in the list for the month
 					// TODO: Convert the person object to a `patientObj` object. -->Call
@@ -339,14 +337,14 @@ public class SSEMRWebServicesController {
 				} else {
 					monthlyGrouping.put(month, Collections.singletonList(obs.getPerson()));
 				}
-				
+
 				// Group by month
 				if (monthlySummary.containsKey(month)) {
 					monthlySummary.put(month, monthlySummary.get(month) + 1);
 				} else {
 					monthlySummary.put(month, 1);
 				}
-				
+
 				// Group by week
 				int week = calendar.get(Calendar.WEEK_OF_MONTH);
 				String weekOfTheMonth = month + "-" + week;
@@ -355,9 +353,9 @@ public class SSEMRWebServicesController {
 				} else {
 					weeklySummary.put(weekOfTheMonth, 1);
 				}
-				
+
 				// Group by day
-				
+
 				int day = calendar.get(Calendar.DAY_OF_WEEK);
 				// use string.format instead of concatenation
 				String day_in_week = String.format("%s-%s", week, days[day]);
@@ -370,14 +368,14 @@ public class SSEMRWebServicesController {
 		}
 		ObjectMapper mapper = new ObjectMapper();
 		simpleObject.put("results", mapper.convertValue(monthlyGrouping, ObjectNode.class));
-		
+
 		SummarySection summary = new SummarySection(JsonNodeFactory.instance);
 		summary.setGroupYear(mapper.convertValue(monthlySummary, ObjectNode.class));
 		summary.setGroupMonth(mapper.convertValue(weeklySummary, ObjectNode.class));
 		summary.setGroupWeek(mapper.convertValue(dailySummary, ObjectNode.class));
-		
+
 		simpleObject.put("summary", summary.toString());
-		
+
 		return simpleObject;
 	}
 	
@@ -474,8 +472,8 @@ public class SSEMRWebServicesController {
 		
 		patientObj.put("uuid", patient.getUuid());
 		patientObj.put("name", patient.getPersonName() != null ? patient.getPersonName().toString() : "");
-		patientObj.put("identifier",
-		    patient.getPatientIdentifier() != null ? patient.getPatientIdentifier().toString() : "");
+		patientObj
+		        .put("identifier", patient.getPatientIdentifier() != null ? patient.getPatientIdentifier().toString() : "");
 		patientObj.put("sex", patient.getGender());
 		patientObj.put("dateEnrolled", dateEnrolled);
 		patientObj.put("newClient", determineIfPatientIsNewClient(patient, startDate, endDate));
@@ -520,15 +518,15 @@ public class SSEMRWebServicesController {
 	private String determineEnrolmentDate(Patient patient) {
 		// Get enrolment encounter type
 		EncounterType enrolmentEncounterType = Context.getEncounterService()
-		        .getEncounterTypeByUuid(ENROLMENT_ENCOUNTER_TYPE_UUID);
+				.getEncounterTypeByUuid(ENROLMENT_ENCOUNTER_TYPE_UUID);
 		// Search enrolment encounter and extract the encounter date as the enrolment
 		// date
-		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(patient, null, null, null, null, null,
-		        Collections.singletonList(enrolmentEncounterType), null, null, null, false);
+		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(patient, null, null, null, null,
+				null, Collections.singletonList(enrolmentEncounterType), null, null, null, false);
 		List<Encounter> encounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
 		// fetch the earliest encounter based on the encounter date
 		Encounter enrolmentEncounter = encounters.stream().min(Comparator.comparing(Encounter::getEncounterDatetime))
-		        .orElse(null);
+				.orElse(null);
 		return enrolmentEncounter != null ? dateTimeFormatter.format(enrolmentEncounter.getEncounterDatetime()) : "";
 	}
 	
@@ -567,27 +565,27 @@ public class SSEMRWebServicesController {
 	private HashSet<Patient> getNewlyEnrolledPatients(Date startDate, Date endDate) {
 		// Get all patients who were enrolled within the specified date range
 		EncounterType enrolmentEncounterType = Context.getEncounterService()
-		        .getEncounterTypeByUuid(ENROLMENT_ENCOUNTER_TYPE_UUID);
+				.getEncounterTypeByUuid(ENROLMENT_ENCOUNTER_TYPE_UUID);
 		// Add a filter for current location
-		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, startDate, endDate, null,
-		        null, Collections.singletonList(enrolmentEncounterType), null, null, null, false);
+		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, startDate, endDate,
+				null, null, Collections.singletonList(enrolmentEncounterType), null, null, null, false);
 		List<Encounter> encounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
 		// Extract patients from encounters into a hashset to remove duplicates
 		HashSet<Patient> enrolledPatients = encounters.stream().map(Encounter::getPatient).collect(HashSet::new,
-		    HashSet::add, HashSet::addAll);
+				HashSet::add, HashSet::addAll);
 		// Get Patients who were transferred in
 		List<Obs> transferInObs = Context.getObsService().getObservations(null, encounters,
-		    Collections.singletonList(Context.getConceptService().getConceptByUuid(TRANSFER_IN_CONCEPT_UUID)),
-		    Collections.singletonList(Context.getConceptService().getConceptByUuid(YES_CONCEPT)), null, null, null, null,
-		    null, null, endDate, false);
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(TRANSFER_IN_CONCEPT_UUID)),
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(YES_CONCEPT)), null, null, null,
+				null, null, null, endDate, false);
 		// Extract patients from transfer in obs into a hashset to remove duplicates
-		HashSet<Person> transferInPatients = transferInObs.stream().map(Obs::getPerson).collect(HashSet::new, HashSet::add,
-		    HashSet::addAll);
-		
+		HashSet<Person> transferInPatients = transferInObs.stream().map(Obs::getPerson).collect(HashSet::new,
+				HashSet::add, HashSet::addAll);
+
 		enrolledPatients.removeIf(transferInPatients::contains);
-		
+
 		return enrolledPatients;
-		
+
 	}
 	
 	private boolean determineIfPatientIsReturningToTreatment(Patient patient) {
@@ -609,17 +607,18 @@ public class SSEMRWebServicesController {
 	}
 	
 	private boolean determineIfPatientIsPregnantOrBreastfeeding(Patient patient, Date endDate) {
-		
+
 		List<Concept> pregnantAndBreastfeedingConcepts = new ArrayList<>();
 		pregnantAndBreastfeedingConcepts
-		        .add(Context.getConceptService().getConceptByUuid(CURRENTLY_BREASTFEEDING_CONCEPT_UUID));
-		pregnantAndBreastfeedingConcepts.add(Context.getConceptService().getConceptByUuid(CURRENTLY_PREGNANT_CONCEPT_UUID));
-		
+				.add(Context.getConceptService().getConceptByUuid(CURRENTLY_BREASTFEEDING_CONCEPT_UUID));
+		pregnantAndBreastfeedingConcepts
+				.add(Context.getConceptService().getConceptByUuid(CURRENTLY_PREGNANT_CONCEPT_UUID));
+
 		List<Obs> obsList = Context.getObsService().getObservations(Collections.singletonList(patient), null,
-		    pregnantAndBreastfeedingConcepts,
-		    Collections.singletonList(Context.getConceptService().getConceptByUuid(CONCEPT_BY_UUID)), null, null, null, null,
-		    null, null, endDate, false);
-		
+				pregnantAndBreastfeedingConcepts,
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(CONCEPT_BY_UUID)), null, null,
+				null, null, null, null, endDate, false);
+
 		return !obsList.isEmpty();
 	}
 	
@@ -636,7 +635,7 @@ public class SSEMRWebServicesController {
 		// }
 		// ArrayNode patientList = JsonNodeFactory.instance.arrayNode();
 		// ObjectNode allPatientsObj = JsonNodeFactory.instance.objectNode();
-		
+
 		return new ArrayList<>();
 	}
 	
