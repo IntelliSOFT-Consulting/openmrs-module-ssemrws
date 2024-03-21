@@ -13,6 +13,7 @@ import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 import java.util.Date;
 import java.util.List;
 
+@SuppressWarnings("deprecation")
 @RunWith(SpringJUnit4ClassRunner.class)
 public class SSEMRWebServicesControllerTest extends BaseModuleContextSensitiveTest {
 	
@@ -42,4 +43,5 @@ public class SSEMRWebServicesControllerTest extends BaseModuleContextSensitiveTe
 		List<Patient> patientList = Context.getPatientService().getAllPatients();
 		assertEquals(1, patientList.size());
 	}
+	
 }

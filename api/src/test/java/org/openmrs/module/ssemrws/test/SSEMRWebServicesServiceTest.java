@@ -7,7 +7,7 @@
  * Copyright (C) OpenMRS Inc. OpenMRS is a registered trademark and the OpenMRS
  * graphic logo is a trademark of OpenMRS Inc.
  */
-package org.openmrs.module.ssemrws.api;
+package org.openmrs.module.ssemrws.test;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -19,18 +19,26 @@ import org.openmrs.api.UserService;
 import org.openmrs.module.ssemrws.Item;
 import org.openmrs.module.ssemrws.api.dao.SSEMRWebServicesDao;
 import org.openmrs.module.ssemrws.api.impl.SSEMRWebServicesServiceImpl;
-import static org.mockito.Mockito.*;
-import static org.hamcrest.Matchers.*;
+import org.openmrs.test.jupiter.BaseContextMockTest;
+
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+
+import static org.hamcrest.Matchers.hasProperty;
+import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.when;
 
 /**
  * This is a unit test, which verifies logic in SSEMRWebServicesService. It doesn't extend
  * BaseModuleContextSensitiveTest, thus it is run without the in-memory DB and Spring context.
  */
-public class SSEMRWebServicesServiceTest {
+
+public class SSEMRWebServicesServiceTest extends BaseContextMockTest {
 	
 	@InjectMocks
-	SSEMRWebServicesServiceImpl basicModuleService;
+	SSEMRWebServicesServiceImpl ssemrWebServicesServiceImpl;
 	
 	@Mock
 	SSEMRWebServicesDao dao;
@@ -55,7 +63,7 @@ public class SSEMRWebServicesServiceTest {
 		when(userService.getUser(1)).thenReturn(user);
 		
 		// When
-		basicModuleService.saveItem(item);
+		ssemrWebServicesServiceImpl.saveItem(item);
 		
 		// Then
 		assertThat(item, hasProperty("owner", is(user)));
