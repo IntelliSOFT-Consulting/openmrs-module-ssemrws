@@ -71,6 +71,8 @@ public class SSEMRWebServicesController {
 	public static final String COMMUNITY_LINKAGE_ENCOUNTER_UUID = "3c2df02e-6856-11ee-8c99-0242ac120002";
 	
 	public static final String DATE_OF_ENROLLMENT_UUID = "e27f8561-e242-4744-9193-b84d752dd86d";
+
+	public static final String VIRAL_LOAD_RESULTS_UUID = "8b5ef5c4-3c88-49b8-87e5-cb8d30caa77d";
 	
 	// Create Enum of the following filter categories: CHILDREN_ADOLESCENTS,
 	// PREGNANT_BREASTFEEDING, RETURN_FROM_IIT, RETURN_TO_TREATMENT
@@ -359,15 +361,61 @@ public class SSEMRWebServicesController {
 		
 		return simpleObject;
 	}
-	
+
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/viralLoadResults")
 	// gets all visit forms for a patient
 	@ResponseBody
-	public Object getViralLoadResults(HttpServletRequest request) {
-		List<Patient> allPatients = Context.getPatientService().getAllPatients(false);
-		// Add logic to filter patients on Child regimen treatment
-		
-		return generateViralLoadListObj(allPatients);
+	public Object getViralLoadResults(HttpServletRequest request, @RequestParam(value = "startDate") String qStartDate,
+									  @RequestParam(value = "endDate") String qEndDate,
+									  @RequestParam(required = false, value = "filter") filterCategory filterCategory) {
+		try {
+			Date startDate = dateTimeFormatter.parse(qStartDate);
+			Date endDate = dateTimeFormatter.parse(qEndDate);
+
+			EncounterType viralLoadEncounterType = Context.getEncounterService()
+					.getEncounterTypeByUuid(FOLLOW_UP_FORM_ENCOUNTER_TYPE);
+			if (viralLoadEncounterType == null) {
+				throw new RuntimeException("Encounter type not found: " + FOLLOW_UP_FORM_ENCOUNTER_TYPE);
+			}
+
+			EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, null, endDate, null,
+					null, Collections.singletonList(viralLoadEncounterType), null, null, null, false);
+			List<Encounter> viralLoadSampleEncounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
+			if (viralLoadSampleEncounters == null || viralLoadSampleEncounters.isEmpty()) {
+				throw new RuntimeException("No encounters found for criteria");
+			}
+
+			Concept viralLoadResultConcept = Context.getConceptService().getConceptByUuid(VIRAL_LOAD_RESULTS_UUID);
+			if (viralLoadResultConcept == null) {
+				throw new RuntimeException("Concept not found: " + VIRAL_LOAD_RESULTS_UUID);
+			}
+			System.out.println("Fetched concept: " + viralLoadResultConcept);
+
+			List<Obs> viralLoadResultObs = Context.getObsService().getObservations(null, viralLoadSampleEncounters,
+					Collections.singletonList(viralLoadResultConcept), null, null, null, null, null, null, startDate, endDate,
+					false);
+			if (viralLoadResultObs == null || viralLoadResultObs.isEmpty()) {
+				throw new RuntimeException("No observations found for the given criteria");
+			}
+
+			// Generate the summary data
+			Map<String, Map<String, Integer>> summaryData = generateDashboardSummaryFromObs(startDate, endDate,
+					viralLoadResultObs, filterCategory);
+			if (summaryData == null || summaryData.isEmpty()) {
+				throw new RuntimeException("Failed to generate summary data");
+			}
+
+			// Convert the summary data to JSON format
+			ObjectMapper objectMapper = new ObjectMapper();
+			String jsonResponse = objectMapper.writeValueAsString(summaryData);
+
+			return jsonResponse;
+
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			throw new RuntimeException("Error occurred while processing viral load results", e);
+		}
 	}
 	
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/viralLoadCoverage")
