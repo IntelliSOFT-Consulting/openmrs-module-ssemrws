@@ -185,7 +185,7 @@ public class SSEMRWebServicesController {
 		Date startDate = dateTimeFormatter.parse(qStartDate);
 		Date endDate = dateTimeFormatter.parse(qEndDate);
 		List<Patient> allPatients = Context.getPatientService().getAllPatients(false);
-		return generatePatientListObj(new HashSet<>(allPatients), endDate, filterCategory);
+		return generatePatientListObj(new HashSet<>(allPatients),startDate, endDate, filterCategory);
 	}
 	
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/dueForVl")
@@ -249,115 +249,129 @@ public class SSEMRWebServicesController {
 
 		return generatePatientListObj(underCareOfCommunityPatients, endDate);
 	}
-	
+
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/viralLoadSamplesCollected")
 	@ResponseBody
-	public Object getViralLoadSamplesCollected(HttpServletRequest request, @RequestParam(value = "startDate") String qStartDate,
-	        @RequestParam(value = "endDate") String qEndDate,
-	        @RequestParam(required = false, value = "filter") filterCategory filterCategory) {
+	public String getViralLoadSamplesCollected(HttpServletRequest request,
+	   	@RequestParam(value = "startDate") String qStartDate, @RequestParam(value = "endDate") String qEndDate,
+	   	@RequestParam(required = false, value = "filter") filterCategory filterCategory) {
 		try {
 			Date startDate = dateTimeFormatter.parse(qStartDate);
 			Date endDate = dateTimeFormatter.parse(qEndDate);
-			
+
 			EncounterType viralLoadEncounterType = Context.getEncounterService()
-			        .getEncounterTypeByUuid(VL_LAB_REQUEST_ENCOUNTER_TYPE);
+					.getEncounterTypeByUuid(VL_LAB_REQUEST_ENCOUNTER_TYPE);
 			EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, null, endDate, null,
-			        null, Collections.singletonList(viralLoadEncounterType), null, null, null, false);
+					null, Collections.singletonList(viralLoadEncounterType), null, null, null, false);
 			List<Encounter> viralLoadSampleEncounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
-			
-			// get the date of sample collection from the obs in the viral load encounters
+
 			Concept sampleCollectionDateConcept = Context.getConceptService().getConceptByUuid(SAMPLE_COLLECTION_DATE_UUID);
 			List<Obs> sampleCollectionDateObs = Context.getObsService().getObservations(null, viralLoadSampleEncounters,
-			    Collections.singletonList(sampleCollectionDateConcept), null, null, null, null, null, null, null, endDate,
-			    false);
-			
-			ObjectNode simpleObject = generateDashboardSummaryFromObs(startDate, endDate, sampleCollectionDateObs,
-			    filterCategory);
-			
-			return simpleObject;
-			
+					Collections.singletonList(sampleCollectionDateConcept), null, null, null, null, null, null, startDate,
+					endDate, false);
+
+			// Generate the summary data
+			Object summaryData = generateDashboardSummaryFromObs(startDate, endDate, sampleCollectionDateObs,
+					filterCategory);
+
+			// Convert the summary data to JSON format
+			ObjectMapper objectMapper = new ObjectMapper();
+			String jsonResponse = objectMapper.writeValueAsString(summaryData);
+
+			return jsonResponse;
+
 		}
-		catch (APIException | ParseException e) {
+		catch (Exception e) {
 			throw new RuntimeException(e);
 		}
 	}
-	
-	private static ObjectNode generateDashboardSummaryFromObs(Date startDate, Date endDate, List<Obs> obsList,
-	        filterCategory filterCategory) {
-		// TODO: Implement filter category logic
-		
-		ObjectNode simpleObject = JsonNodeFactory.instance.objectNode();
-		// Instantiate an array with all months of the year
-		String[] months = new String[] { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-		        "Dec" };
-		
-		// Instantiate an array with all days of the week
-		String[] days = new String[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-		
-		HashMap<String, List<ObjectNode>> monthlyGrouping = new HashMap<>();
-		HashMap<String, Integer> weeklySummary = new HashMap<>();
-		HashMap<String, Integer> monthlySummary = new HashMap<>();
-		HashMap<String, Integer> dailySummary = new HashMap<>();
-		
-		// For each obs in the obsList, filter Value Datetime that falls between the
-		// start date and end date
+
+	private Map<String, Map<String, Integer>> generateDashboardSummaryFromObs(Date startDate, Date endDate,
+																			  List<Obs> obsList, filterCategory filterCategory) {
+
+		if (obsList == null) {
+			throw new IllegalArgumentException("Observation list cannot be null");
+		}
+
+		List<Date> dates = new ArrayList<>();
 		for (Obs obs : obsList) {
-			if (obs.getValueDate().after(DateUtils.addDays(startDate, -1))
-			        && obs.getValueDate().before(DateUtils.addDays(endDate, 1))) {
-				// Add logic to group the data by month and week and day and calculate counts
-				// for each group
-				Calendar calendar = Calendar.getInstance();
-				calendar.setTime(obs.getValueDate());
-				String month = months[calendar.get(Calendar.MONTH)];
-				
-				Person person = obs.getPerson();
-				ObjectNode personObj = generatePatientObject(endDate, filterCategory, (Patient) person);
-				if (monthlyGrouping.containsKey(month)) {
-					// check if person already exists in the list for the month
-					if (!monthlyGrouping.get(month).contains(personObj)) {
-						monthlyGrouping.get(month).add(personObj);
-					}
-				} else {
-					monthlyGrouping.put(month, Collections.singletonList(personObj));
-				}
-				
-				// Group by month
-				if (monthlySummary.containsKey(month)) {
-					monthlySummary.put(month, monthlySummary.get(month) + 1);
-				} else {
-					monthlySummary.put(month, 1);
-				}
-				
-				// Group by week
-				int week = calendar.get(Calendar.WEEK_OF_MONTH);
-				String weekOfTheMonth = String.format("%s_%s", month, week);
-				if (weeklySummary.containsKey(weekOfTheMonth)) {
-					weeklySummary.put(weekOfTheMonth, weeklySummary.get(weekOfTheMonth) + 1);
-				} else {
-					weeklySummary.put(weekOfTheMonth, 1);
-				}
-				
-				// Group by day
-				
-				int day = calendar.get(Calendar.DAY_OF_WEEK);
-				// use string.format instead of concatenation
-				String day_in_week = String.format("%s_%s", week, days[day]);
-				if (dailySummary.containsKey(day_in_week)) {
-					dailySummary.put(day_in_week, dailySummary.get(day_in_week) + 1);
-				} else {
-					dailySummary.put(day_in_week, 1);
-				}
+			if (obs == null) {
+				System.out.println("Encountered null observation");
+				continue;
+			}
+
+			Date obsDate = obs.getObsDatetime();
+			if (obsDate == null) {
+				System.out.println("Encountered observation with null date: " + obs);
+				continue;
+			}
+
+			if (obsDate.after(DateUtils.addDays(startDate, -1)) && obsDate.before(DateUtils.addDays(endDate, 1))) {
+				dates.add(obsDate);
 			}
 		}
-		ObjectMapper mapper = new ObjectMapper();
-		ObjectNode summaryNode = mapper.createObjectNode();
-		summaryNode.put("groupYear", mapper.valueToTree(monthlySummary));
-		summaryNode.put("groupMonth", mapper.valueToTree(weeklySummary));
-		summaryNode.put("groupWeek", mapper.valueToTree(dailySummary));
-		
-		simpleObject.put("summary", summaryNode);
-		
-		return simpleObject;
+
+		return generateSummary(dates);
+	}
+
+	private Map<String, Map<String, Integer>> generateSummary(List<Date> dates) {
+		String[] months = new String[] { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
+				"Dec" };
+		String[] days = new String[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+
+		Map<String, Integer> monthlySummary = new HashMap<>();
+		Map<String, Integer> weeklySummary = new HashMap<>();
+		Map<String, Integer> dailySummary = new HashMap<>();
+
+		for (Date date : dates) {
+			Calendar calendar = Calendar.getInstance();
+			calendar.setTime(date);
+
+			String month = months[calendar.get(Calendar.MONTH)];
+			monthlySummary.put(month, monthlySummary.getOrDefault(month, 0) + 1);
+
+			int week = calendar.get(Calendar.WEEK_OF_MONTH);
+			String weekOfTheMonth = String.format("%s_Week%s", month, week);
+			weeklySummary.put(weekOfTheMonth, weeklySummary.getOrDefault(weekOfTheMonth, 0) + 1);
+
+			int day = calendar.get(Calendar.DAY_OF_WEEK);
+			String dayInWeek = String.format("%s_%s", month, days[day - 1]);
+			dailySummary.put(dayInWeek, dailySummary.getOrDefault(dayInWeek, 0) + 1);
+		}
+
+		// Sorting the summaries
+		Map<String, Integer> sortedMonthlySummary = monthlySummary.entrySet().stream()
+				.sorted(Comparator.comparingInt(e -> Arrays.asList(months).indexOf(e.getKey())))
+				.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
+
+		Map<String, Integer> sortedWeeklySummary = weeklySummary.entrySet().stream().sorted((e1, e2) -> {
+			String[] parts1 = e1.getKey().split("_Week");
+			String[] parts2 = e2.getKey().split("_Week");
+			int monthCompare = Arrays.asList(months).indexOf(parts1[0]) - Arrays.asList(months).indexOf(parts2[0]);
+			if (monthCompare != 0) {
+				return monthCompare;
+			} else {
+				return Integer.parseInt(parts1[1]) - Integer.parseInt(parts2[1]);
+			}
+		}).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
+
+		Map<String, Integer> sortedDailySummary = dailySummary.entrySet().stream().sorted((e1, e2) -> {
+			String[] parts1 = e1.getKey().split("_");
+			String[] parts2 = e2.getKey().split("_");
+			int monthCompare = Arrays.asList(months).indexOf(parts1[0]) - Arrays.asList(months).indexOf(parts2[0]);
+			if (monthCompare != 0) {
+				return monthCompare;
+			} else {
+				return Arrays.asList(days).indexOf(parts1[1]) - Arrays.asList(days).indexOf(parts2[1]);
+			}
+		}).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (e1, e2) -> e1, LinkedHashMap::new));
+
+		Map<String, Map<String, Integer>> summary = new HashMap<>();
+		summary.put("groupYear", sortedMonthlySummary);
+		summary.put("groupMonth", sortedWeeklySummary);
+		summary.put("groupWeek", sortedDailySummary);
+
+		return summary;
 	}
 	
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/viralLoadResults")
@@ -389,78 +403,78 @@ public class SSEMRWebServicesController {
 		
 		return generateViralLoadListObj(allPatients);
 	}
-	
+
 	private Object generatePatientListObj(HashSet<Patient> allPatients) {
 		return generatePatientListObj(allPatients, new Date());
 	}
-	
-	private Object generatePatientListObj(HashSet<Patient> allPatients, Date endDate) {
-		return generatePatientListObj(allPatients, new Date(), null);
+
+	public Object generatePatientListObj(HashSet<Patient> allPatients, Date endDate) {
+		return generatePatientListObj(allPatients, new Date(), endDate);
 	}
-	
-	private Object generatePatientListObj(HashSet<Patient> allPatients, Date endDate, filterCategory filterCategory) {
+
+	public Object generatePatientListObj(HashSet<Patient> allPatients, Date startDate, Date endDate) {
+		return generatePatientListObj(allPatients, startDate, endDate, null);
+	}
+
+	/**
+	 * Generates a summary of patient data within a specified date range, grouped by year, month, and
+	 * week.
+	 *
+	 * @param allPatients A set of all patients to be considered for the summary.
+	 * @param startDate The start date of the range for which to generate the summary.
+	 * @param endDate The end date of the range for which to generate the summary.
+	 * @param filterCategory The category to filter patients.
+	 * @return A JSON string representing the summary of patient data.
+	 */
+	public Object generatePatientListObj(HashSet<Patient> allPatients, Date startDate, Date endDate,
+										 filterCategory filterCategory) {
+
 		ArrayNode patientList = JsonNodeFactory.instance.arrayNode();
 		ObjectNode allPatientsObj = JsonNodeFactory.instance.objectNode();
-		
-		// Initialize HashMaps to store counts
-		HashMap<String, Integer> yearlySummary = new HashMap<>();
-		HashMap<String, Integer> monthlySummary = new HashMap<>();
-		HashMap<String, Integer> weeklySummary = new HashMap<>();
-		
+
+		List<Date> patientDates = new ArrayList<>();
+		Calendar startCal = Calendar.getInstance();
+		startCal.setTime(startDate);
+		Calendar endCal = Calendar.getInstance();
+		endCal.setTime(endDate);
+
 		for (Patient patient : allPatients) {
-			ObjectNode patientObj = generatePatientObject(endDate, filterCategory, patient);
+			ObjectNode patientObj = generatePatientObject(startDate, endDate, filterCategory, patient);
 			if (patientObj != null) {
 				patientList.add(patientObj);
-				
-				// Extract month, week, and day
-				Calendar calendar = Calendar.getInstance();
-				calendar.setTime(endDate);
-				int monthOfYear = calendar.get(Calendar.MONTH);
-				int weekOfMonth = calendar.get(Calendar.WEEK_OF_MONTH);
-				int dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK);
-				
-				// Update counts for month
-				String monthKey = new DateFormatSymbols().getMonths()[monthOfYear];
-				monthlySummary.put(monthKey, monthlySummary.getOrDefault(monthKey, 0) + 1);
-				
-				// Update counts for week
-				String weekKey = "Week" + weekOfMonth;
-				weeklySummary.put(weekKey, weeklySummary.getOrDefault(weekKey, 0) + 1);
-				
-				// Update counts for day
-				String dayKey = new DateFormatSymbols().getShortWeekdays()[dayOfWeek];
-				if (!dayKey.isEmpty()) {
-					yearlySummary.put(dayKey, yearlySummary.getOrDefault(dayKey, 0) + 1);
+
+				Calendar patientCal = Calendar.getInstance();
+				patientCal.setTime(patient.getDateCreated());
+
+				if (!patientCal.before(startCal) && !patientCal.after(endCal)) {
+					patientDates.add(patient.getDateCreated());
 				}
 			}
 		}
-		
-		// Construct summary object
+
+		Map<String, Map<String, Integer>> summary = generateSummary(patientDates);
+
 		ObjectNode groupingObj = JsonNodeFactory.instance.objectNode();
 		ObjectNode groupYear = JsonNodeFactory.instance.objectNode();
 		ObjectNode groupMonth = JsonNodeFactory.instance.objectNode();
 		ObjectNode groupWeek = JsonNodeFactory.instance.objectNode();
-		
-		groupYear.putAll(yearlySummary.entrySet().stream()
-		        .collect(Collectors.toMap(Map.Entry::getKey, e -> JsonNodeFactory.instance.numberNode(e.getValue()))));
-		groupMonth.putAll(monthlySummary.entrySet().stream()
-		        .collect(Collectors.toMap(Map.Entry::getKey, e -> JsonNodeFactory.instance.numberNode(e.getValue()))));
-		groupWeek.putAll(weeklySummary.entrySet().stream()
-		        .collect(Collectors.toMap(Map.Entry::getKey, e -> JsonNodeFactory.instance.numberNode(e.getValue()))));
-		
+
+		summary.get("groupYear").forEach(groupYear::put);
+		summary.get("groupMonth").forEach(groupMonth::put);
+		summary.get("groupWeek").forEach(groupWeek::put);
+
 		groupingObj.put("groupYear", groupYear);
 		groupingObj.put("groupMonth", groupMonth);
 		groupingObj.put("groupWeek", groupWeek);
-		
+
 		allPatientsObj.put("results", patientList);
 		allPatientsObj.put("summary", groupingObj);
-		
+
 		return allPatientsObj.toString();
 	}
 	
-	private static ObjectNode generatePatientObject(Date endDate, filterCategory filterCategory, Patient patient) {
+	private static ObjectNode generatePatientObject(Date startDate, Date endDate, filterCategory filterCategory, Patient patient) {
 		ObjectNode patientObj = JsonNodeFactory.instance.objectNode();
-		Date startDate = new Date();
 		String dateEnrolled = determineEnrolmentDate(patient, startDate, endDate);
 		String lastRefillDate = getLastRefillDate(patient, startDate, endDate);
 		// Calculate age in years based on patient's birthdate and current date
