@@ -92,8 +92,23 @@ public class SSEMRWebServicesController {
 	public static final String CONCEPT_BY_UUID = "78763e68-104e-465d-8ce3-35f9edfb083d";
 	
 	public static final String TELEPHONE_NUMBER_UUID = "8f0a2a16-c073-4622-88ad-a11f2d6966ad";
-	
+
+	public static final String HIGH_VL_ENCOUNTERTYPE_UUID = "f7f1c854-69e5-11ee-8c99-0242ac120002";
+
+	public static final String BREASTFEEDING_CONCEPT_UUID = "cf5c7deb-f67c-4406-82ea-d619e502f47c";
+
+	public static final String PREGNANT_CONCEPT_UUID = "5dcb1bc9-ee89-4b57-9493-a1f245c5ee8b";
+
+	public static final String PMTCT_CONCEPT_UUID = "da20f4fc-94b4-421c-896c-cf16a834227a";
+
+	public static final String EAC_SESSION_CONCEPT_UUID = "65536958-fc01-4002-8839-af4b6ab0489b";
+
+	public static final String EXTENDED_EAC_CONCEPT_UUID = "99c7c0f1-3c7c-4e26-bf4b-60a74734bc7c";
+
+
 	private static final double THRESHOLD = 1000.0;
+
+	private static final int SIX_MONTHS_IN_DAYS = 183;
 	
 	/** Logger for this class and subclasses */
 	protected final Log log = LogFactory.getLog(getClass());
@@ -187,14 +202,232 @@ public class SSEMRWebServicesController {
 		List<Patient> allPatients = Context.getPatientService().getAllPatients(false);
 		return generatePatientListObj(new HashSet<>(allPatients), endDate, filterCategory);
 	}
-	
+
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/dueForVl")
 	// gets all visit forms for a patient
 	@ResponseBody
-	public Object getPatientsDueForVl(HttpServletRequest request) {
+	public Object getPatientsDueForVl(HttpServletRequest request, @RequestParam("startDate") String qStartDate,
+									  @RequestParam("endDate") String qEndDate,
+									  @RequestParam(required = false, value = "filter") filterCategory filterCategory) throws ParseException {
+
+		Date startDate = dateTimeFormatter.parse(qStartDate);
+		Date endDate = dateTimeFormatter.parse(qEndDate);
+
+		List<String> dueForVlEncounterTypeUuids = Arrays.asList(PERSONAL_FAMILY_HISTORY_ENCOUNTERTYPE_UUID,
+				FOLLOW_UP_FORM_ENCOUNTER_TYPE, HIGH_VL_ENCOUNTERTYPE_UUID);
+
+		List<Encounter> dueForVlEncounters = getEncountersByEncounterTypes(dueForVlEncounterTypeUuids, startDate, endDate);
+
+		List<String> dueforVLConceptUuids = Arrays.asList(ACTIVE_REGIMEN_CONCEPT_UUID, VIRAL_LOAD_CONCEPT_UUID,
+				BREASTFEEDING_CONCEPT_UUID, PREGNANT_CONCEPT_UUID, PMTCT_CONCEPT_UUID, EAC_SESSION_CONCEPT_UUID,
+				EXTENDED_EAC_CONCEPT_UUID);
+
+		List<Concept> dueForVlConcepts = getConceptsByUuids(dueforVLConceptUuids);
+
+		List<Obs> dueforVLObs = Context.getObsService().getObservations(null, dueForVlEncounters, dueForVlConcepts, null,
+				null, null, null, null, null, startDate, endDate, false);
+
 		List<Patient> allPatients = Context.getPatientService().getAllPatients(false);
-		
-		return generatePatientListObj((HashSet<Patient>) allPatients);
+
+		List<Patient> patientsDueForVl = new ArrayList<>();
+
+		for (Patient patient : allPatients) {
+			if (isPatientDueForVl(patient, dueforVLObs, startDate, endDate)) {
+				patientsDueForVl.add(patient);
+			}
+		}
+
+		return generatePatientListObj(new HashSet<>(patientsDueForVl), endDate);
+	}
+
+	private static boolean isPatientDueForVl(Patient patient, List<Obs> observations, Date startDate, Date endDate) {
+		boolean isDueForVl = false;
+
+		// Iterate through observations to determine criteria fulfillment
+		for (Obs obs : observations) {
+			if (obs.getPerson().equals(patient)) {
+
+				// Criteria 1: Clients who are adults, have been on ART for more than 6 months,
+				// not breastfeeding and the VL result is suppressed (< 1000 copies/ml).
+				// If the VL results are suppressed the client will be due for VL in 6 months
+				// then 12 months and so on.
+				if (isAdult(patient) && onArtForMoreThanSixMonths(patient) && !isBreastfeeding(patient)
+						&& isViralLoadSuppressed(patient)) {
+					Date nextDueDate = calculateNextDueDate(obs, 6);
+					if (nextDueDate.before(endDate)) {
+						isDueForVl = true;
+						break;
+					}
+				}
+
+				// Criteria 2: Child or adolescent up to 18 yrs of age. The will have the VL
+				// sample collected after 6 months and when they turn 19 yrs they join criteria
+				// 1.
+				if (isChildOrAdolescent(patient) && onArtForMoreThanSixMonths(patient)) {
+					Date nextDueDate = calculateNextDueDate(obs, 6);
+					if (nextDueDate.before(endDate)) {
+						isDueForVl = true;
+						break;
+					}
+				}
+
+				// Criteria 3: Pregnant woman, newly enrolled on ART will be due for Viral load
+				// after every 3 months until they are no longer in PMTCT.
+				if (isPregnant(patient) && newlyEnrolledOnArt(patient)) {
+					Date nextDueDate = calculateNextDueDate(obs, 3);
+					if (nextDueDate.before(endDate)) {
+						isDueForVl = true;
+						break;
+					}
+				}
+
+				// Criteria 4: Pregnant woman already on ART are eligible immediately they find
+				// out they are pregnant.
+				if (isPregnant(patient) && alreadyOnArt(patient)) {
+					isDueForVl = true;
+					break;
+				}
+
+				// Criteria 5: After EAC 3, they are eligible for VL in the next one month.
+				if (afterEac3(patient)) {
+					Date nextDueDate = calculateNextDueDate(obs, 1);
+					if (nextDueDate.before(endDate)) {
+						isDueForVl = true;
+						break;
+					}
+				}
+			}
+		}
+		return isDueForVl;
+	}
+
+	private static boolean isAdult(Patient patient) {
+		Date birthdate = patient.getBirthdate();
+		if (birthdate == null) {
+			return false;
+		}
+
+		Date currentDate = new Date();
+		long ageInMillis = currentDate.getTime() - birthdate.getTime();
+		long ageInYears = ageInMillis / (1000L * 60 * 60 * 24 * 365);
+
+		return ageInYears >= 18;
+	}
+
+	private static boolean onArtForMoreThanSixMonths(Patient patient) {
+		List<Obs> onArtObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()), null,
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(ACTIVE_REGIMEN_CONCEPT_UUID)), null, null,
+				null, null, 1, null, null, null, false);
+
+		if (onArtObs != null && !onArtObs.isEmpty()) {
+			Date startDate = onArtObs.get(0).getObsDatetime();
+			Date currentDate = new Date();
+
+			// Calculate the difference in days between the current date and the start date
+			long diffInMillis = currentDate.getTime() - startDate.getTime();
+			long diffInDays = diffInMillis / (1000L * 60 * 60 * 24);
+
+			return diffInDays > SIX_MONTHS_IN_DAYS;
+		}
+		return false;
+	}
+
+	private static boolean isBreastfeeding(Patient patient) {
+		List<Obs> breastFeedingObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()),
+				null, Collections.singletonList(Context.getConceptService().getConceptByUuid(BREASTFEEDING_CONCEPT_UUID)),
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(YES_CONCEPT)), null, null, null, 1, null,
+				null, null, false);
+
+		return breastFeedingObs != null && !breastFeedingObs.isEmpty();
+	}
+
+	private static boolean isViralLoadSuppressed(Patient patient) {
+		List<Obs> viralLoadSuppressedObs = Context.getObsService().getObservations(
+				Collections.singletonList(patient.getPerson()), null,
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(VIRAL_LOAD_CONCEPT_UUID)), null, null,
+				null, null, null, null, null, null, false);
+
+		if (viralLoadSuppressedObs != null && !viralLoadSuppressedObs.isEmpty()) {
+			return viralLoadSuppressedObs.get(0).getValueNumeric() < THRESHOLD;
+		}
+
+		return false;
+	}
+
+	private static boolean isChildOrAdolescent(Patient patient) {
+		Date birthdate = patient.getBirthdate();
+		if (birthdate == null) {
+			return false;
+		}
+
+		Date currentDate = new Date();
+		long ageInMillis = currentDate.getTime() - birthdate.getTime();
+		long ageInYears = ageInMillis / (1000L * 60 * 60 * 24 * 365);
+
+		return ageInYears < 18;
+	}
+
+	private static boolean isPregnant(Patient patient) {
+		List<Obs> pregnantObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()), null,
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(PREGNANT_CONCEPT_UUID)),
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(YES_CONCEPT)), null, null, null, 1, null,
+				null, null, false);
+
+		return pregnantObs != null && !pregnantObs.isEmpty();
+	}
+
+	private static boolean newlyEnrolledOnArt(Patient patient) {
+		List<Obs> newlyEnrolledOnArtObs = Context.getObsService().getObservations(
+				Collections.singletonList(patient.getPerson()), null,
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(ACTIVE_REGIMEN_CONCEPT_UUID)), null, null,
+				null, null, 1, null, null, null, false);
+
+		if (newlyEnrolledOnArtObs != null && !newlyEnrolledOnArtObs.isEmpty()) {
+			Date startDate = newlyEnrolledOnArtObs.get(0).getObsDatetime();
+			Date currentDate = new Date();
+
+			// Calculate the difference in days between the current date and the start date
+			long diffInMillis = currentDate.getTime() - startDate.getTime();
+			long diffInDays = diffInMillis / (1000L * 60 * 60 * 24);
+
+			return diffInDays < SIX_MONTHS_IN_DAYS;
+		}
+		return false;
+	}
+
+	private static boolean alreadyOnArt(Patient patient) {
+		List<Obs> alreadyOnArtObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()),
+				null, Collections.singletonList(Context.getConceptService().getConceptByUuid(ACTIVE_REGIMEN_CONCEPT_UUID)), null,
+				null, null, null, 1, null, null, null, false);
+
+		return alreadyOnArtObs != null && !alreadyOnArtObs.isEmpty();
+	}
+
+	private static boolean afterEac3(Patient patient) {
+		List<Obs> extendedEacObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()),
+				null, Collections.singletonList(Context.getConceptService().getConceptByUuid(EAC_SESSION_CONCEPT_UUID)),
+				Collections.singletonList(Context.getConceptService().getConceptByUuid(EXTENDED_EAC_CONCEPT_UUID)), null, null,
+				null, 1, null, null, null, false);
+
+		return extendedEacObs != null && !extendedEacObs.isEmpty();
+	}
+
+	private static Date calculateNextDueDate(Obs obs, int months) {
+		Calendar calendar = Calendar.getInstance();
+		calendar.setTime(obs.getObsDatetime());
+		calendar.add(Calendar.MONTH, months);
+		return calendar.getTime();
+	}
+
+	/**
+	 * Retrieves a list of concepts based on their UUIDs.
+	 *
+	 * @param conceptUuids A list of UUIDs of concepts to retrieve.
+	 * @return A list of concepts corresponding to the given UUIDs.
+	 */
+	private static List<Concept> getConceptsByUuids(List<String> conceptUuids) {
+		return conceptUuids.stream().map(uuid -> Context.getConceptService().getConceptByUuid(uuid))
+				.collect(Collectors.toList());
 	}
 	
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/missedAppointment")
