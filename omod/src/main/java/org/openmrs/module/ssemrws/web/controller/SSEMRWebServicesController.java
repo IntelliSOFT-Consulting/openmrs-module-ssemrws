@@ -91,6 +91,10 @@ public class SSEMRWebServicesController {
 	private static final String CURRENTLY_PREGNANT_CONCEPT_UUID = "235a6246-6179-4309-ba84-6f0ec337eb48";
 	
 	public static final String CONCEPT_BY_UUID = "78763e68-104e-465d-8ce3-35f9edfb083d";
+	
+	public static final String TELEPHONE_NUMBER_UUID = "8f0a2a16-c073-4622-88ad-a11f2d6966ad";
+
+	public static final String DATE_VL_RESULTS_RECEIVED_UUID = "80e34f1b-26e8-49ea-9b6e-d7d903a91e26";
 
 	public static final String BMI_CONCEPT_UUID = "1342AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
@@ -861,6 +865,24 @@ public class SSEMRWebServicesController {
 				.collect(Collectors.toCollection(HashSet::new));
 	}
 
+	private static String getDateVLResultsReceived(Patient patient) {
+		Concept dateVLResultsReceivedConcept = Context.getConceptService().getConceptByUuid(DATE_VL_RESULTS_RECEIVED_UUID);
+
+		List<Obs> dateVLResultsReceivedObs = Context.getObsService().getObservations(
+				Collections.singletonList(patient.getPerson()), null, Collections.singletonList(dateVLResultsReceivedConcept),
+				null, null, null, null, null, null, null, null, false);
+
+		if (!dateVLResultsReceivedObs.isEmpty()) {
+			Obs dateVLReceivedObs = dateVLResultsReceivedObs.get(0);
+			Date dateVLResultsReceived = dateVLReceivedObs.getValueDate();
+			if (dateVLResultsReceived != null) {
+				return dateTimeFormatter.format(dateVLResultsReceived);
+			}
+		}
+		return "";
+	}
+
+
 	private static Double getBMI(Patient patient) {
 		List<Obs> bmiObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()), null,
 				Collections.singletonList(Context.getConceptService().getConceptByUuid(BMI_CONCEPT_UUID)), null, null, null,
@@ -885,8 +907,8 @@ public class SSEMRWebServicesController {
 		}
 
 		return null;
-	}
-	
+  }
+  
 	private Object generateViralLoadListObj(List<Patient> allPatients) {
 		// The expected output for this method should resemble this JSON output
 		// [{
