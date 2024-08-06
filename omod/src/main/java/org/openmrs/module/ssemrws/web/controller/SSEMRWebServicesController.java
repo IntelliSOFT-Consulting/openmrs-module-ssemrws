@@ -178,17 +178,26 @@ public class SSEMRWebServicesController {
 		
 		return allFormsObj.toString();
 	}
-	
+
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/allClients")
 	// gets all visit forms for a patient
 	@ResponseBody
 	public Object getAllPatients(HttpServletRequest request, @RequestParam("startDate") String qStartDate,
-	        @RequestParam("endDate") String qEndDate,
-	        @RequestParam(required = false, value = "filter") filterCategory filterCategory) throws ParseException {
+								 @RequestParam("endDate") String qEndDate,
+								 @RequestParam(required = false, value = "filter") filterCategory filterCategory,
+								 @RequestParam(value = "page", defaultValue = "0") int page,
+								 @RequestParam(value = "size", defaultValue = "50") int size) throws ParseException {
+
 		Date startDate = dateTimeFormatter.parse(qStartDate);
 		Date endDate = dateTimeFormatter.parse(qEndDate);
 		List<Patient> allPatients = Context.getPatientService().getAllPatients(false);
-		return generatePatientListObj(new HashSet<>(allPatients), endDate, filterCategory);
+
+		int startIndex = page * size;
+		int endIndex = Math.min(startIndex + size, allPatients.size());
+
+		List<Patient> patients = allPatients.subList(startIndex, endIndex);
+
+		return generatePatientListObj(new HashSet<>(patients), startDate, endDate, filterCategory);
 	}
 	
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/dueForVl")
