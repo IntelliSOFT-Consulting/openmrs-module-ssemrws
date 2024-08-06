@@ -13,7 +13,11 @@ import javax.servlet.http.HttpServletRequest;
 import java.text.DateFormatSymbols;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang.time.DateUtils;
@@ -72,6 +76,8 @@ public class SSEMRWebServicesController {
 	public static final String COMMUNITY_LINKAGE_ENCOUNTER_UUID = "3c2df02e-6856-11ee-8c99-0242ac120002";
 	
 	public static final String DATE_OF_ENROLLMENT_UUID = "e27f8561-e242-4744-9193-b84d752dd86d";
+	
+	public static final String DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID = "e605731b-2e81-41a9-8446-2ed442c339e2";
 	
 	// Create Enum of the following filter categories: CHILDREN_ADOLESCENTS,
 	// PREGNANT_BREASTFEEDING, RETURN_FROM_IIT, RETURN_TO_TREATMENT
@@ -143,9 +149,9 @@ public class SSEMRWebServicesController {
 			 * CoreContext.getInstance().getManager(FormManager.class); List<FormDescriptor>
 			 * uncompletedFormDescriptors =
 			 * formManager.getAllUncompletedFormsForVisit(patientVisit);
-			 * 
+			 *
 			 * if (!uncompletedFormDescriptors.isEmpty()) {
-			 * 
+			 *
 			 * for (FormDescriptor descriptor : uncompletedFormDescriptors) {
 			 * if(!descriptor.getTarget().getRetired()) { ObjectNode formObj =
 			 * generateFormDescriptorPayload(descriptor); formObj.put("formCategory",
@@ -200,15 +206,6 @@ public class SSEMRWebServicesController {
 		return generatePatientListObj((HashSet<Patient>) allPatients);
 	}
 	
-	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/missedAppointment")
-	// gets all visit forms for a patient
-	@ResponseBody
-	public Object getPatientsMissedAppointment(HttpServletRequest request) {
-		List<Patient> allPatients = Context.getPatientService().getAllPatients(false);
-		
-		return generatePatientListObj((HashSet<Patient>) allPatients);
-	}
-
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/adultRegimenTreatment")
 	// gets all visit forms for a patient
 	@ResponseBody
@@ -227,11 +224,12 @@ public class SSEMRWebServicesController {
 		// Add logic to filter patients on Child regimen treatment
 		return generatePatientListObj((HashSet<Patient>) allPatients);
 	}
-
+	
 	/**
 	 * Retrieves a list of patients under the care of community programs within a specified date range.
-	 *
-	 * @return An Object representing the list of patients under the care of community programs within the specified date range.
+	 * 
+	 * @return An Object representing the list of patients under the care of community programs within
+	 *         the specified date range.
 	 */
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/underCareOfCommunityProgrammes")
 	@ResponseBody
@@ -240,23 +238,23 @@ public class SSEMRWebServicesController {
 	        @RequestParam(required = false, value = "filter") filterCategory filterCategory) throws ParseException {
 		Date startDate = dateTimeFormatter.parse(qStartDate);
 		Date endDate = dateTimeFormatter.parse(qEndDate);
-
+		
 		EncounterType communityLinkageEncounterType = Context.getEncounterService()
 		        .getEncounterTypeByUuid(COMMUNITY_LINKAGE_ENCOUNTER_UUID);
 		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, startDate, endDate, null,
 		        null, Collections.singletonList(communityLinkageEncounterType), null, null, null, false);
 		List<Encounter> encounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
-
+		
 		HashSet<Patient> underCareOfCommunityPatients = encounters.stream().map(Encounter::getPatient).collect(HashSet::new,
 		    HashSet::add, HashSet::addAll);
-
+		
 		return generatePatientListObj(underCareOfCommunityPatients, endDate);
 	}
 	
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/viralLoadSamplesCollected")
 	@ResponseBody
-	public Object getViralLoadSamplesCollected(HttpServletRequest request, @RequestParam(value = "startDate") String qStartDate,
-	        @RequestParam(value = "endDate") String qEndDate,
+	public Object getViralLoadSamplesCollected(HttpServletRequest request,
+	        @RequestParam(value = "startDate") String qStartDate, @RequestParam(value = "endDate") String qEndDate,
 	        @RequestParam(required = false, value = "filter") filterCategory filterCategory) {
 		try {
 			Date startDate = dateTimeFormatter.parse(qStartDate);
@@ -492,8 +490,8 @@ public class SSEMRWebServicesController {
 		patientObj.put("returningToTreatment", determineIfPatientIsReturningToTreatment(patient, endDate));
 		patientObj.put("dueForVl", determineIfPatientIsDueForVl(patient));
 		patientObj.put("highVl", determineIfPatientIsHighVl(patient, endDate));
-		patientObj.put("onAppointment", determineIfPatientIsOnAppointment(patient));
-		patientObj.put("missedAppointment", determineIfPatientMissedAppointment(patient));
+		patientObj.put("onAppointment", determineIfPatientIsOnAppointment(patient, endDate));
+		patientObj.put("missedAppointment", determineIfPatientMissedAppointment(patient, endDate));
 		
 		// check filter category and filter patients based on the category
 		if (filterCategory != null) {
@@ -524,24 +522,165 @@ public class SSEMRWebServicesController {
 		return null;
 	}
 	
-	private static boolean determineIfPatientMissedAppointment(Patient patient) {
+	/**
+	 * Returns a list of patients who missed an appointment.
+	 * 
+	 * @return A JSON representation of the list of patients who missed an appointment, including
+	 *         summary information about each patient.
+	 */
+	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/missedAppointment")
+	@ResponseBody
+	public Object getPatientsMissedAppointment(HttpServletRequest request, @RequestParam("startDate") String qStartDate,
+	        @RequestParam("endDate") String qEndDate,
+	        @RequestParam(required = false, value = "filter") filterCategory filterCategory) throws ParseException {
+		Date startDate = dateTimeFormatter.parse(qStartDate);
+		Date endDate = dateTimeFormatter.parse(qEndDate);
 		
-		return Math.random() < 0.5;
-		// TODO: Add logic to determine if patient Missed appointment
-		// return false;
+		List<String> misseAppointmentencounterTypeUuids = Collections.singletonList(FOLLOW_UP_FORM_ENCOUNTER_TYPE);
+		
+		List<Encounter> missedAppointmentEncounters = getEncountersByEncounterTypes(misseAppointmentencounterTypeUuids,
+		    startDate, endDate);
+		
+		List<Obs> missedAppointmentObs = Context.getObsService().getObservations(null, missedAppointmentEncounters,
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID)),
+		    null, null, null, null, null, null, null, endDate, false);
+		
+		HashSet<Patient> missedAppointmentPatientsFiltered = missedAppointmentObs.stream()
+		        .filter(obs -> obs.getPerson() instanceof Patient).map(obs -> (Patient) obs.getPerson()).filter(patient -> {
+			        Date appointmentScheduledDate = null;
+			        for (Obs obs : missedAppointmentObs) {
+				        if (obs.getPerson().equals(patient)
+				                && obs.getConcept().getUuid().equals(DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID)) {
+					        appointmentScheduledDate = obs.getValueDatetime();
+					        break;
+				        }
+			        }
+			        
+			        if (appointmentScheduledDate != null) {
+				        LocalDate today = LocalDate.now();
+				        LocalDate scheduledDate = appointmentScheduledDate.toInstant().atZone(ZoneId.systemDefault())
+				                .toLocalDate();
+				        long diffInDays = ChronoUnit.DAYS.between(scheduledDate, today);
+
+						return diffInDays >= 1 && diffInDays < 28;
+			        }
+			        return false;
+		        }).collect(Collectors.toCollection(HashSet::new));
+		
+		return generatePatientListObj(missedAppointmentPatientsFiltered, endDate);
 	}
 	
-	private static boolean determineIfPatientIsOnAppointment(Patient patient) {
-		return Math.random() < 0.5;
-		// TODO: Add logic to determine if patient was on appointment
-		// return false;
-	}
+	private static boolean determineIfPatientMissedAppointment(Patient patient, Date endDate) {
+		List<Concept> missedAppointmentConcept = new ArrayList<>();
+		missedAppointmentConcept.add(Context.getConceptService().getConceptByUuid(DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID));
+		
+		List<Obs> obsList = Context.getObsService().getObservations(Collections.singletonList(patient), null,
+		    missedAppointmentConcept, null, null, null, null, null, null, null, endDate, false);
+		
+		if (!obsList.isEmpty()) {
+			Date appointmentScheduledDate = null;
+			for (Obs obs : obsList) {
+				if (obs.getPerson().equals(patient)
+				        && obs.getConcept().getUuid().equals(DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID)) {
+					appointmentScheduledDate = obs.getValueDatetime();
+					break;
+				}
+			}
+			
+			if (appointmentScheduledDate != null) {
+				LocalDate today = LocalDate.now();
+				LocalDate scheduledDate = appointmentScheduledDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+				long diffInDays = ChronoUnit.DAYS.between(scheduledDate, today);
 
+				return diffInDays >= 1 && diffInDays < 28;
+			}
+		}
+		return !obsList.isEmpty();
+	}
+	
 	/**
-	 * Handles the HTTP GET request to retrieve patients with high viral load values within a specified date range.
-	 * This method filters patients based on their viral load observations, identifying those with values above a predefined threshold.
-	 *
-	 * @return A JSON representation of the list of patients with high viral load, including summary information about each patient.
+	 * Returns a list of patients on appointment.
+	 * 
+	 * @return A JSON representation of the list of patients on appointment, including summary
+	 *         information about each patient.
+	 */
+	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/onAppointment")
+	@ResponseBody
+	public Object getPatientsOnAppointment(HttpServletRequest request, @RequestParam("startDate") String qStartDate,
+	        @RequestParam("endDate") String qEndDate,
+	        @RequestParam(required = false, value = "filter") filterCategory filterCategory) throws ParseException {
+		Date startDate = dateTimeFormatter.parse(qStartDate);
+		Date endDate = dateTimeFormatter.parse(qEndDate);
+		
+		List<String> onAppointmentencounterTypeUuids = Collections.singletonList(FOLLOW_UP_FORM_ENCOUNTER_TYPE);
+		
+		List<Encounter> onAppointmentEncounters = getEncountersByEncounterTypes(onAppointmentencounterTypeUuids, startDate,
+		    endDate);
+		
+		List<Obs> onAppointmentObs = Context.getObsService().getObservations(null, onAppointmentEncounters,
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID)),
+		    null, null, null, null, null, null, null, endDate, false);
+		
+		HashSet<Patient> onAppointmentPatientsFiltered = onAppointmentObs.stream()
+		        .filter(obs -> obs.getPerson() instanceof Patient).map(obs -> (Patient) obs.getPerson()).filter(patient -> {
+			        Date appointmentScheduledDate = null;
+			        for (Obs obs : onAppointmentObs) {
+				        if (obs.getPerson().equals(patient)
+				                && obs.getConcept().getUuid().equals(DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID)) {
+					        appointmentScheduledDate = obs.getValueDatetime();
+					        break;
+				        }
+			        }
+			        
+			        if (appointmentScheduledDate != null) {
+				        LocalDate today = LocalDate.now();
+				        LocalDate scheduledDate = appointmentScheduledDate.toInstant().atZone(ZoneId.systemDefault())
+				                .toLocalDate();
+				        long diffInDays = ChronoUnit.DAYS.between(scheduledDate, today);
+				        
+				        return diffInDays == 0;
+			        }
+			        return false;
+		        }).collect(Collectors.toCollection(HashSet::new));
+		
+		return generatePatientListObj(onAppointmentPatientsFiltered, endDate);
+	}
+	
+	private static boolean determineIfPatientIsOnAppointment(Patient patient, Date endDate) {
+		List<Concept> onAppointmentConcept = new ArrayList<>();
+		onAppointmentConcept.add(Context.getConceptService().getConceptByUuid(DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID));
+		
+		List<Obs> obsList = Context.getObsService().getObservations(Collections.singletonList(patient), null,
+		    onAppointmentConcept, null, null, null, null, null, null, null, endDate, false);
+		
+		if (!obsList.isEmpty()) {
+			Date appointmentScheduledDate = null;
+			for (Obs obs : obsList) {
+				if (obs.getPerson().equals(patient)
+				        && obs.getConcept().getUuid().equals(DATE_APPOINTMENT_SCHEDULED_CONCEPT_UUID)) {
+					appointmentScheduledDate = obs.getValueDatetime();
+					break;
+				}
+			}
+			
+			if (appointmentScheduledDate != null) {
+				LocalDate today = LocalDate.now();
+				LocalDate scheduledDate = appointmentScheduledDate.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+				long diffInDays = ChronoUnit.DAYS.between(scheduledDate, today);
+
+				return diffInDays == 0;
+			}
+		}
+		return !obsList.isEmpty();
+	}
+	
+	/**
+	 * Handles the HTTP GET request to retrieve patients with high viral load values within a specified
+	 * date range. This method filters patients based on their viral load observations, identifying
+	 * those with values above a predefined threshold.
+	 * 
+	 * @return A JSON representation of the list of patients with high viral load, including summary
+	 *         information about each patient.
 	 */
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/highVl")
 	// gets all visit forms for a patient
@@ -581,11 +720,13 @@ public class SSEMRWebServicesController {
 		return highVLPatients;
 		
 	}
-	// Determine if Patient is High Viral Load and return true if it is equal or above threshold
+	
+	// Determine if Patient is High Viral Load and return true if it is equal or
+	// above threshold
 	private static boolean determineIfPatientIsHighVl(Patient patient, Date endDate) {
 		Concept vlConcept = Context.getConceptService().getConceptByUuid(VIRAL_LOAD_CONCEPT_UUID);
 		List<Obs> vlObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()), null,
-				Collections.singletonList(vlConcept), null, null, null, null, 1, null, null, endDate, false);
+		    Collections.singletonList(vlConcept), null, null, null, null, 1, null, null, endDate, false);
 		if (vlObs != null && !vlObs.isEmpty()) {
 			return vlObs.get(0).getValueNumeric() >= THRESHOLD;
 		}
@@ -605,14 +746,15 @@ public class SSEMRWebServicesController {
 		// #logicToDetermineIfNewlyEnrolled method
 		// return false;
 	}
-
+	
 	/**
-	 * Handles the HTTP GET request to retrieve patients who have returned to treatment after an interruption.
-	 * This method filters encounters based on ART treatment interruption encounter types and aggregates patients
-	 * who have returned to treatment within the specified date range.
-	 *
+	 * Handles the HTTP GET request to retrieve patients who have returned to treatment after an
+	 * interruption. This method filters encounters based on ART treatment interruption encounter types
+	 * and aggregates patients who have returned to treatment within the specified date range.
+	 * 
 	 * @param request The HttpServletRequest object, providing request information for HTTP servlets.
-	 * @return A JSON representation of the list of patients who have returned to treatment, including summary information about each patient.
+	 * @return A JSON representation of the list of patients who have returned to treatment, including
+	 *         summary information about each patient.
 	 */
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/returnedToTreatment")
 	@ResponseBody
@@ -657,13 +799,12 @@ public class SSEMRWebServicesController {
 		
 		return !obsList.isEmpty();
 	}
-
+	
 	/**
-	 * Handles the HTTP GET request to retrieve patients who have experienced an interruption in their treatment.
-	 * This method filters encounters based on ART treatment interruption encounter types and aggregates patients
-	 * who have had such encounters within the specified date range. It aims to identify patients who might need
-	 * follow-up or intervention due to treatment interruption.
-	 *
+	 * Handles the HTTP GET request to retrieve patients who have experienced an interruption in their
+	 * treatment. This method filters encounters based on ART treatment interruption encounter types and
+	 * aggregates patients who have had such encounters within the specified date range. It aims to
+	 * identify patients who might need follow-up or intervention due to treatment interruption.
 	 */
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/interruptedInTreatment")
 	@ResponseBody
@@ -707,9 +848,8 @@ public class SSEMRWebServicesController {
 	}
 	
 	/**
-	 * Handles the request to get a list of active patients within a specified date range.
-	 * Active patients are determined based on an active Regimen.
-	 *
+	 * Handles the request to get a list of active patients within a specified date range. Active
+	 * patients are determined based on an active Regimen.
 	 */
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/activeClients")
 	@ResponseBody
@@ -739,7 +879,7 @@ public class SSEMRWebServicesController {
 		
 		return generatePatientListObj(activePatients, endDate);
 	}
-
+	
 	// Retrieves a list of encounters filtered by encounter types.
 	private List<Encounter> getEncountersByEncounterTypes(List<String> encounterTypeUuids, Date startDate, Date endDate) {
 		List<EncounterType> encounterTypes = encounterTypeUuids.stream()
@@ -749,7 +889,7 @@ public class SSEMRWebServicesController {
 		        encounterTypes, null, null, null, false);
 		return Context.getEncounterService().getEncounters(encounterCriteria);
 	}
-
+	
 	// Determine if Patient is Pregnant or Breastfeeding
 	private static boolean determineIfPatientIsPregnantOrBreastfeeding(Patient patient, Date endDate) {
 		
@@ -765,7 +905,7 @@ public class SSEMRWebServicesController {
 		
 		return !obsList.isEmpty();
 	}
-
+	
 	// Retrieve the Last Refill Date from Patient Observation
 	private static String getLastRefillDate(Patient patient, Date startDate, Date endDate) {
 		Concept lastRefillDateConcept = Context.getConceptService().getConceptByUuid(LAST_REFILL_DATE_UUID);
@@ -819,8 +959,9 @@ public class SSEMRWebServicesController {
 		return enrolledPatients;
 		
 	}
-
-	// Determine Patient Enrollment Date From the Adult and Adolescent and Pediatric Forms
+	
+	// Determine Patient Enrollment Date From the Adult and Adolescent and Pediatric
+	// Forms
 	private static String determineEnrolmentDate(Patient patient, Date startDate, Date endDate) {
 		Concept enrollmentDateConcept = Context.getConceptService().getConceptByUuid(DATE_OF_ENROLLMENT_UUID);
 		List<Obs> enrollmentDateObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()),
