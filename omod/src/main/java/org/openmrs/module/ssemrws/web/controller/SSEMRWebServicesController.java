@@ -1984,6 +1984,7 @@ public class SSEMRWebServicesController {
 			return lastcd4Obs.getValueNumeric();
 		}
 		return null;
+
 	}
 	
 	private static String getTbStatus(Patient patient) {
