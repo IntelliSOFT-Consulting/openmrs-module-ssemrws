@@ -1,10 +1,13 @@
 package org.openmrs.module.ssemrws.constants;
 
+import org.apache.commons.lang3.time.DateUtils;
 import org.codehaus.jackson.node.ArrayNode;
 import org.codehaus.jackson.node.JsonNodeFactory;
 import org.codehaus.jackson.node.ObjectNode;
 import org.openmrs.*;
+import org.openmrs.api.PatientService;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.ssemrws.web.controller.SSEMRWebServicesController;
 import org.openmrs.module.ssemrws.web.dto.PatientObservations;
 import org.openmrs.parameter.EncounterSearchCriteria;
 import org.springframework.http.HttpHeaders;
@@ -19,51 +22,42 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.openmrs.module.ssemrws.web.constants.AllConcepts.*;
+import static org.openmrs.module.ssemrws.web.constants.GenerateSummary.generateSummary;
+import static org.openmrs.module.ssemrws.web.constants.RegimenConcepts.*;
 
 public class SharedConstants {
 	
 	public static SimpleDateFormat dateTimeFormatter = new SimpleDateFormat("dd-MM-yyyy");
 	
+	public static final double THRESHOLD = 1000.0;
+	
+	public static final int SIX_MONTHS_IN_DAYS = 183;
+	
 	@PersistenceContext
 	private EntityManager entityManager;
 	
-	public class DateRange {
+	public static Date[] getStartAndEndDate(String qStartDate, String qEndDate, SimpleDateFormat dateTimeFormatter)
+	        throws ParseException {
+		Date endDate = (qEndDate != null) ? dateTimeFormatter.parse(qEndDate) : new Date();
+		Calendar calendar = Calendar.getInstance();
+		calendar.setTime(endDate);
+		calendar.set(Calendar.DAY_OF_MONTH, 1);
+		Date startDate = (qStartDate != null) ? dateTimeFormatter.parse(qStartDate) : calendar.getTime();
 		
-		private final Date startDate;
-		
-		private final Date endDate;
-		
-		public DateRange(Date startDate, Date endDate) {
-			this.startDate = startDate;
-			this.endDate = endDate;
-		}
-		
-		public Date getStartDate() {
-			return startDate;
-		}
-		
-		public Date getEndDate() {
-			return endDate;
-		}
+		return new Date[] { startDate, endDate };
 	}
 	
 	public static Object getPatientsOnRegimenTreatment(String qStartDate, String qEndDate, List<String> regimenConceptUuids,
 	        String activeRegimenConceptUuid) throws ParseException {
 		
-		Date startDate = dateTimeFormatter.parse(qStartDate);
-		Date endDate = dateTimeFormatter.parse(qEndDate);
-		
-		List<String> regimenTreatmentEncounterTypeUuids = Arrays.asList(PERSONAL_FAMILY_HISTORY_ENCOUNTERTYPE_UUID,
-		    FOLLOW_UP_FORM_ENCOUNTER_TYPE);
-		
-		List<Encounter> regimenTreatmentEncounters = getEncountersByEncounterTypes(regimenTreatmentEncounterTypeUuids,
-		    startDate, endDate);
+		SimpleDateFormat dateTimeFormatter = new SimpleDateFormat("yyyy-MM-dd");
+		Date[] dates = getStartAndEndDate(qStartDate, qEndDate, dateTimeFormatter);
 		
 		List<Concept> regimenConcepts = getConceptsByUuids(regimenConceptUuids);
 		
-		List<Obs> regimenTreatmentObs = Context.getObsService().getObservations(null, regimenTreatmentEncounters,
+		List<Obs> regimenTreatmentObs = Context.getObsService().getObservations(null, null,
 		    Collections.singletonList(Context.getConceptService().getConceptByUuid(activeRegimenConceptUuid)),
-		    regimenConcepts, null, null, null, null, null, null, endDate, false);
+		    regimenConcepts, null, null, null, null, null, dates[0], dates[1], false);
 		
 		Map<String, Integer> regimenCounts = new HashMap<>();
 		
@@ -492,7 +486,7 @@ public class SharedConstants {
 		TRANSFERRED_OUT
 	}
 	
-	public static HashSet<Patient> getTransferredOutPatients(Date startDate, Date endDate) {
+	public static HashSet<Patient> getTransferredOutClients(Date startDate, Date endDate) {
 		Concept transferredOutConcept = ConceptCache.getCachedConcept(TRANSFERRED_OUT_CONCEPT_UUID);
 		Concept yesConcept = ConceptCache.getCachedConcept(YES_CONCEPT);
 		
@@ -539,5 +533,231 @@ public class SharedConstants {
 		}
 		
 		return deadPatients;
+	}
+	
+	public static List<Encounter> getEncountersByDateRange(List<String> encounterTypeUuids, Date startDate, Date endDate) {
+		return getEncountersByEncounterTypes(encounterTypeUuids, startDate, endDate);
+	}
+	
+	public static List<Obs> getObservationsByDateRange(List<Encounter> encounters, List<Concept> concepts, Date startDate,
+	        Date endDate) {
+		return Context.getObsService().getObservations(null, null, concepts, null, null, null, null, null, null, startDate,
+		    endDate, false);
+	}
+	
+	public static HashSet<Patient> extractPatientsFromEncounters(List<Encounter> encounters) {
+		HashSet<Patient> patients = new HashSet<>();
+		for (Encounter encounter : encounters) {
+			patients.add(encounter.getPatient());
+		}
+		return patients;
+	}
+	
+	public static HashSet<Patient> extractPatientsFromObservations(List<Obs> observations) {
+		HashSet<Patient> patients = new HashSet<>();
+		for (Obs obs : observations) {
+			Person person = obs.getPerson();
+			if (person != null) {
+				Patient patient = Context.getPatientService().getPatient(person.getPersonId());
+				if (patient != null) {
+					patients.add(patient);
+				}
+			}
+		}
+		return patients;
+	}
+	
+	public static HashSet<Patient> getTransferredInPatients(Date startDate, Date endDate) {
+		PatientService patientService = Context.getPatientService();
+		List<Patient> allPatients = patientService.getAllPatients();
+		
+		return allPatients.stream()
+		        .filter(patient -> patient.getIdentifiers().stream()
+		                .anyMatch(identifier -> identifier.getIdentifier().startsWith("TI-")))
+		        .collect(Collectors.toCollection(HashSet::new));
+	}
+	
+	public static HashSet<Patient> getReturnToTreatmentPatients(Date startDate, Date endDate) {
+		List<String> returnedToTreatmentencounterTypeUuids = Collections
+		        .singletonList(ART_TREATMENT_INTURRUPTION_ENCOUNTER_TYPE_UUID);
+		
+		List<Encounter> returnedToTreatmentEncounters = getEncountersByEncounterTypes(returnedToTreatmentencounterTypeUuids,
+		    startDate, endDate);
+		
+		List<Obs> returnedToTreatmentObs = Context.getObsService().getObservations(null, returnedToTreatmentEncounters,
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(RETURNING_TO_TREATMENT_UUID)),
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(CONCEPT_BY_UUID)), null, null, null, null,
+		    null, startDate, endDate, false);
+		
+		HashSet<Patient> returnToTreatmentPatients = new HashSet<>();
+		
+		for (Obs obs : returnedToTreatmentObs) {
+			Patient patient = (Patient) obs.getPerson();
+			returnToTreatmentPatients.add(patient);
+		}
+		
+		return returnToTreatmentPatients;
+	}
+	
+	// Get all patients who have high Viral Load
+	public static HashSet<Patient> getPatientsWithHighVL(Date startDate, Date endDate) {
+		return getPatientsWithVL(startDate, endDate, FOLLOW_UP_FORM_ENCOUNTER_TYPE, VIRAL_LOAD_CONCEPT_UUID);
+	}
+	
+	public static HashSet<Patient> getPatientsWithPersistentHighVL(Date startDate, Date endDate) {
+		return getPatientsWithVL(startDate, endDate, HIGH_VL_ENCOUNTERTYPE_UUID, REPEAT_VL_RESULTS);
+	}
+	
+	public static HashSet<Patient> getPatientsWithVL(Date startDate, Date endDate, String encounterTypeUuid,
+	        String conceptUuid) {
+		EncounterType encounterType = Context.getEncounterService().getEncounterTypeByUuid(encounterTypeUuid);
+		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, startDate, endDate, null,
+		        null, Collections.singletonList(encounterType), null, null, null, false);
+		List<Encounter> encounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
+		
+		HashSet<Patient> vlPatients = new HashSet<>();
+		
+		List<Obs> vlObs = Context.getObsService().getObservations(null, encounters,
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(conceptUuid)), null, null, null, null,
+		    null, null, startDate, endDate, false);
+		
+		for (Obs obs : vlObs) {
+			if (obs.getValueNumeric() != null && obs.getValueNumeric() >= THRESHOLD) {
+				vlPatients.add((Patient) obs.getPerson());
+			}
+		}
+		
+		HashSet<Patient> deceasedPatients = getDeceasedPatientsByDateRange(startDate, endDate);
+		HashSet<Patient> transferredOutPatients = getTransferredOutClients(startDate, endDate);
+		
+		vlPatients.removeAll(deceasedPatients);
+		vlPatients.removeAll(transferredOutPatients);
+		
+		return vlPatients;
+	}
+	
+	public static HashSet<Patient> getPatientsWithRepeatedVL(Date startDate, Date endDate) {
+		EncounterType repeatViralLoadEncounterType = Context.getEncounterService()
+		        .getEncounterTypeByUuid(HIGH_VL_ENCOUNTERTYPE_UUID);
+		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, startDate, endDate, null,
+		        null, Collections.singletonList(repeatViralLoadEncounterType), null, null, null, false);
+		List<Encounter> encounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
+		
+		HashSet<Patient> repeatviralLoadPatients = new HashSet<>();
+		
+		List<Obs> repeatviralLoadObs = Context.getObsService().getObservations(null, encounters,
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(REAPEAT_VL_COLLECTION)), null, null, null,
+		    null, null, null, startDate, endDate, false);
+		
+		for (Obs obs : repeatviralLoadObs) {
+			if (obs != null) {
+				repeatviralLoadPatients.add((Patient) obs.getPerson());
+			}
+		}
+		
+		return repeatviralLoadPatients;
+		
+	}
+	
+	public static HashSet<Patient> getPatientsWithSwitchART(Date startDate, Date endDate) {
+		EncounterType switchARTRegimenEncounterType = Context.getEncounterService()
+		        .getEncounterTypeByUuid(FOLLOW_UP_FORM_ENCOUNTER_TYPE);
+		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, startDate, endDate, null,
+		        null, Collections.singletonList(switchARTRegimenEncounterType), null, null, null, false);
+		List<Encounter> encounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
+		
+		HashSet<Patient> switchARTRegimenPatients = new HashSet<>();
+		Map<Patient, String> patientPreviousRegimen = new HashMap<>();
+		
+		List<Obs> switchARTRegimenObs = Context.getObsService().getObservations(null, encounters,
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(ACTIVE_REGIMEN_CONCEPT_UUID)), null, null,
+		    null, null, null, null, startDate, endDate, false);
+		
+		for (Obs obs : switchARTRegimenObs) {
+			if (obs != null && obs.getPerson() instanceof Patient) {
+				Patient patient = (Patient) obs.getPerson();
+				String currentRegimen = obs.getValueCoded() != null ? obs.getValueCoded().getUuid() : null;
+				
+				if (currentRegimen != null) {
+					if (patientPreviousRegimen.containsKey(patient)) {
+						String previousRegimen = patientPreviousRegimen.get(patient);
+						if (!currentRegimen.equals(previousRegimen)) {
+							switchARTRegimenPatients.add(patient);
+						}
+					}
+					patientPreviousRegimen.put(patient, currentRegimen);
+				}
+			}
+		}
+		
+		return switchARTRegimenPatients;
+	}
+	
+	public static HashSet<Patient> getPatientsWithSecondLineSwitchART(Date startDate, Date endDate) {
+		EncounterType secondLineSwitchARTRegimenEncounterType = Context.getEncounterService()
+		        .getEncounterTypeByUuid(FOLLOW_UP_FORM_ENCOUNTER_TYPE);
+		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, startDate, endDate, null,
+		        null, Collections.singletonList(secondLineSwitchARTRegimenEncounterType), null, null, null, false);
+		List<Encounter> encounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
+		
+		HashSet<Patient> secondLineSwitchARTRegimenPatients = new HashSet<>();
+		
+		List<Obs> secondLineSwitchARTRegimenObs = Context.getObsService().getObservations(null, encounters,
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(ACTIVE_REGIMEN_CONCEPT_UUID)), null, null,
+		    null, null, null, null, startDate, endDate, false);
+		
+		for (Obs obs : secondLineSwitchARTRegimenObs) {
+			if (obs != null && obs.getPerson() instanceof Patient) {
+				Patient patient = (Patient) obs.getPerson();
+				String currentRegimen = obs.getValueCoded() != null ? obs.getValueCoded().getUuid() : null;
+				
+				if (currentRegimen != null && SECOND_LINE_REGIMENS.contains(currentRegimen)) {
+					secondLineSwitchARTRegimenPatients.add(patient);
+				}
+			}
+		}
+		
+		return secondLineSwitchARTRegimenPatients;
+	}
+	
+	// Determine if Patient is High Viral Load and return true if it is equal or
+	// above threshold
+	public static boolean determineIfPatientIsHighVl(Patient patient) {
+		List<Obs> vlObs = Context.getObsService().getObservations(Collections.singletonList(patient.getPerson()), null,
+		    Collections.singletonList(Context.getConceptService().getConceptByUuid(VIRAL_LOAD_CONCEPT_UUID)), null, null,
+		    null, null, 1, null, null, null, false);
+		
+		if (vlObs != null && !vlObs.isEmpty()) {
+			return vlObs.get(0).getValueNumeric() >= THRESHOLD;
+		}
+		return false;
+	}
+	
+	public static Map<String, Map<String, Integer>> generateDashboardSummaryFromObs(Date startDate, Date endDate,
+	        List<Obs> obsList, SSEMRWebServicesController.filterCategory filterCategory) {
+		
+		if (obsList == null) {
+			throw new IllegalArgumentException("Observation list cannot be null");
+		}
+		
+		List<Date> dates = new ArrayList<>();
+		for (Obs obs : obsList) {
+			if (obs == null) {
+				System.out.println("Encountered null observation");
+				continue;
+			}
+			
+			Date obsDate = obs.getObsDatetime();
+			if (obsDate == null) {
+				System.out.println("Encountered observation with null date: " + obs);
+				continue;
+			}
+			
+			if (obsDate.after(DateUtils.addDays(startDate, -1)) && obsDate.before(DateUtils.addDays(endDate, 1))) {
+				dates.add(obsDate);
+			}
+		}
+		
+		return generateSummary(dates);
 	}
 }

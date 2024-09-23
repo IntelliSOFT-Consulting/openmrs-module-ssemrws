@@ -1,5 +1,7 @@
 package org.openmrs.module.ssemrws.web.dto;
 
+import ca.uhn.hl7v2.model.v23.datatype.ST;
+
 public class PatientObservations {
 	
 	private String enrollmentDate;
@@ -37,6 +39,10 @@ public class PatientObservations {
 	private String appointmentDate;
 	
 	private String clinicianName;
+	
+	private String vlEligibility;
+	
+	private String vlDueDate;
 	
 	public String getEnrollmentDate() {
 		return enrollmentDate;
@@ -180,5 +186,21 @@ public class PatientObservations {
 	
 	public void setClinicianName(String clinicianName) {
 		this.clinicianName = clinicianName;
+	}
+	
+	public String getVlEligibility() {
+		return vlEligibility;
+	}
+	
+	public void setVlEligibility(String vlEligibility) {
+		this.vlEligibility = vlEligibility;
+	}
+	
+	public String getVlDueDate() {
+		return vlDueDate;
+	}
+	
+	public void setVlDueDate(String vlDueDate) {
+		this.vlDueDate = vlDueDate;
 	}
 }
