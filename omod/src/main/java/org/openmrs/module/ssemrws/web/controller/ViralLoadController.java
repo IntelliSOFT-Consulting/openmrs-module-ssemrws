@@ -233,6 +233,48 @@ public class ViralLoadController {
 		return response;
 	}
 	
+	/**
+	 * This method handles the calculation for the viral Load coverage chart and retrieves the necessary
+	 * data to be displayed
+	 */
+	
+	@RequestMapping(method = RequestMethod.GET, value = "/chart/viralLoadCoverage")
+	@ResponseBody
+	public Object viralLoadCoverageChart(HttpServletRequest request, @RequestParam("startDate") String qStartDate,
+	        @RequestParam("endDate") String qEndDate) throws ParseException {
+		SimpleDateFormat dateTimeFormatter = new SimpleDateFormat("yyyy-MM-dd");
+		Date[] dates = getStartAndEndDate(qStartDate, qEndDate, dateTimeFormatter);
+		
+		int totalPatients = Context.getPatientService().getAllPatients().size();
+
+		if (totalPatients == 0) {
+			Map<String, Object> response = new HashMap<>();
+			response.put("Total Patients", 0);
+			response.put("covered", 0);
+			response.put("notCovered", 0);
+			return response;
+		}
+		
+		List<Patient> patientsWithVLCoverage = fetchPatientsWithViralLoadCoverage(dates[0], dates[1]);
+
+		if (patientsWithVLCoverage == null) {
+			patientsWithVLCoverage = new ArrayList<>();
+		};
+		int vlCoverage = patientsWithVLCoverage.size();
+		
+		int notVlCovered = totalPatients - vlCoverage;
+		
+		int covered = Math.round(((float) vlCoverage / totalPatients) * 100);
+		int notCovered = Math.round(((float) notVlCovered / totalPatients) * 100);
+		
+		Map<String, Object> response = new HashMap<>();
+		response.put("Total Patients", totalPatients);
+		response.put("covered", covered);
+		response.put("notCovered", notCovered);
+		
+		return response;
+	}
+	
 	private List<Patient> fetchPatientsWithViralLoadCoverage(Date startDate, Date endDate) {
 		Set<Integer> patientIds = fetchViralLoadPatientIds(startDate, endDate);
 		
