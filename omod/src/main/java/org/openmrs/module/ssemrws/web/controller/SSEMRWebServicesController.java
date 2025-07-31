@@ -509,6 +509,64 @@ public class SSEMRWebServicesController {
 		return paginateAndGenerateSummary(underCareList, page, size, totalPatients, dates[0], dates[1], filterCategory);
 	}
 	
+	/**
+	 * Retrieves a list of patients under the care of community programs within a specified date range.
+	 * 
+	 * @return An Object representing the percentage of the clients who have and have not been linked to
+	 *         a community health worker
+	 */
+	@RequestMapping(method = RequestMethod.GET, value = "/chart/underCareOfCommunityProgrammes")
+	@ResponseBody
+	public Object getUnderCareOfCommunityProgram(HttpServletRequest request, @RequestParam("startDate") String qStartDate,
+	        @RequestParam("endDate") String qEndDate,
+	        @RequestParam(required = false, value = "filter") filterCategory filterCategory,
+	        @RequestParam(value = "page", required = false) Integer page,
+	        @RequestParam(value = "size", required = false) Integer size) throws ParseException {
+		
+		SimpleDateFormat dateTimeFormatter = new SimpleDateFormat("yyyy-MM-dd");
+		Date[] dates = getStartAndEndDate(qStartDate, qEndDate, dateTimeFormatter);
+		
+		if (page == null)
+			page = 0;
+		if (size == null)
+			size = 15;
+		
+		int totalPatients = Context.getPatientService().getAllPatients().size();
+		
+		if (totalPatients == 0) {
+			Map<String, Integer> response = new HashMap<>();
+			response.put("totalPatients", 0);
+			response.put("linkedToCHW", 0);
+			response.put("notLinkedToCHW", 0);
+			return response;
+		}
+		
+		EncounterType communityLinkageEncounterType = Context.getEncounterService()
+		        .getEncounterTypeByUuid(COMMUNITY_LINKAGE_ENCOUNTER_UUID);
+		EncounterSearchCriteria encounterSearchCriteria = new EncounterSearchCriteria(null, null, dates[0], dates[1], null,
+		        null, Collections.singletonList(communityLinkageEncounterType), null, null, null, false);
+		List<Encounter> encounters = Context.getEncounterService().getEncounters(encounterSearchCriteria);
+		
+		HashSet<Patient> underCareOfCommunityPatients = encounters.stream().map(Encounter::getPatient).collect(HashSet::new,
+		    HashSet::add, HashSet::addAll);
+		
+		underCareOfCommunityPatients = underCareOfCommunityPatients.stream()
+		        .filter(patient -> FilterUtility.applyFilter(patient, filterCategory, dates[1]))
+		        .collect(Collectors.toCollection(HashSet::new));
+		
+		List<Patient> underCareList = new ArrayList<>(underCareOfCommunityPatients);
+		
+		int linkedToCHW = Math.round(((float) underCareList.size() / totalPatients) * 100);
+		int notLinkedToCHW = 100 - linkedToCHW;
+		
+		Map<String, Integer> response = new HashMap<>();
+		response.put("totalPatients", totalPatients);
+		response.put("linkedToCHW", linkedToCHW);
+		response.put("notLinkedToCHW", notLinkedToCHW);
+		
+		return response;
+	}
+	
 	@RequestMapping(method = RequestMethod.GET, value = "/dashboard/obs")
 	@ResponseBody
 	public ResponseEntity<Object> getPatientObs(HttpServletRequest request, @RequestParam("patientUuid") String patientUuid,
