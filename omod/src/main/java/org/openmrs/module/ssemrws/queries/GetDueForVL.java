@@ -21,8 +21,9 @@ public class GetDueForVL {
 	private EntityManager entityManager;
 	
 	private Object executeDueForVlQuery(Date startDate, Date endDate) {
-		String baseQuery = "WITH LatestFP AS ( "
-		        + "    SELECT f.*, ROW_NUMBER() OVER(PARTITION BY f.client_id ORDER BY f.encounter_datetime DESC) as rn "
+		String baseQuery = "WITH LatestFP AS ( " + "    SELECT f.*, ROW_NUMBER() OVER(PARTITION BY f.client_id "
+		        + "        ORDER BY " + "            CASE WHEN f.date_vl_sample_collected IS NOT NULL THEN 1 ELSE 2 END, "
+		        + "            f.date_vl_sample_collected DESC, " + "            f.encounter_datetime DESC " + "    ) as rn "
 		        + "    FROM ssemr_etl.ssemr_flat_encounter_hiv_care_follow_up f " + "), " + "LatestHVL AS ( "
 		        + "    SELECT h.*, ROW_NUMBER() OVER(PARTITION BY h.client_id ORDER BY h.encounter_datetime DESC) as rn "
 		        + "    FROM ssemr_etl.ssemr_flat_encounter_high_viral_load h " + "), "

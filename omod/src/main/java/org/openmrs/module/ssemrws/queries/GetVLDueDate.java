@@ -78,12 +78,13 @@ public class GetVLDueDate {
 		if (isPatientInHVLCohort(patient)) {
 			return "Pending EAC 3";
 		}
-		String query = "WITH LatestFP AS ( "
-		        + "    SELECT f.*, ROW_NUMBER() OVER(PARTITION BY f.client_id ORDER BY f.encounter_datetime DESC) as rn "
-		        + "    FROM ssemr_etl.ssemr_flat_encounter_hiv_care_follow_up f " + "    WHERE f.client_id = :patientId "
-		        + "), " + "LatestHVL AS ( "
+		String query = "WITH LatestFP AS ( " + "    SELECT f.*, ROW_NUMBER() OVER(PARTITION BY f.client_id "
+		        + "        ORDER BY " + "            CASE WHEN f.date_vl_sample_collected IS NOT NULL THEN 1 ELSE 2 END, "
+		        + "            f.date_vl_sample_collected DESC, " + "            f.encounter_datetime DESC " + "    ) as rn "
+		        + "    FROM ssemr_etl.ssemr_flat_encounter_hiv_care_follow_up f WHERE f.client_id = :patientId " + "), "
+		        + "LatestHVL AS ( "
 		        + "    SELECT h.*, ROW_NUMBER() OVER(PARTITION BY h.client_id ORDER BY h.encounter_datetime DESC) as rn "
-		        + "    FROM ssemr_etl.ssemr_flat_encounter_high_viral_load h " + "    WHERE h.client_id = :patientId " + ") "
+		        + "    FROM ssemr_etl.ssemr_flat_encounter_high_viral_load h WHERE h.client_id = :patientId " + ") "
 		        + "SELECT DISTINCT p.person_id as client_id, " + "DATE_FORMAT(CASE "
 		        
 		        + "WHEN hvl.encounter_datetime > fp.encounter_datetime THEN " + "CASE "
@@ -113,23 +114,19 @@ public class GetVLDueDate {
 		        + ") THEN DATE_ADD(pfh.art_start_date, INTERVAL 6 MONTH) "
 				
 				// --- CHILD & HVL-SPECIFIC CONDITIONS (Most specific first) ---
-		        + "WHEN hvl.third_eac_session_date IS NOT NULL AND (hvl.repeat_vl_results IS NULL) THEN DATE_ADD(hvl.third_eac_session_date, INTERVAL 1 MONTH) "
-				
 		        + "WHEN (mp.age <= 18 AND hvl.repeat_vl_sample_date IS NOT NULL) AND (fp.client_pmtct = 'No' OR fp.client_pmtct IS NULL) AND (hvl.repeat_vl_value IS NULL AND hvl.repeat_vl_results IS NULL) THEN DATE_ADD(hvl.third_eac_session_date, INTERVAL 1 MONTH) "
-				
-		        + "WHEN hvl.repeat_vl_sample_date IS NOT NULL AND (hvl.repeat_vl_value < 1000 OR hvl.repeat_vl_results = 'Below Detectable (BDL)') THEN DATE_ADD(hvl.repeat_vl_sample_date, INTERVAL 6 MONTH) "
-				
 		        + "WHEN (mp.age <= 18 AND pfh.art_start_date IS NOT NULL) AND (fp.client_pmtct = 'No' OR fp.client_pmtct IS NULL) AND (fp.date_vl_sample_collected IS NULL AND fp.vl_results IS NULL) AND hvl.repeat_vl_sample_date IS NULL THEN DATE_ADD(pfh.art_start_date, INTERVAL 6 MONTH) "
-				
 		        + "WHEN (mp.age <= 18 AND fp.date_vl_sample_collected IS NOT NULL) AND (fp.client_pmtct = 'No' OR fp.client_pmtct IS NULL) AND hvl.repeat_vl_sample_date IS NULL THEN DATE_ADD(fp.date_vl_sample_collected, INTERVAL 6 MONTH) "
+				
+		        + "WHEN hvl.third_eac_session_date IS NOT NULL AND (hvl.repeat_vl_results IS NULL) THEN DATE_ADD(hvl.third_eac_session_date, INTERVAL 1 MONTH) "
+		        + "WHEN hvl.repeat_vl_sample_date IS NOT NULL AND (hvl.repeat_vl_value < 1000 OR hvl.repeat_vl_results = 'Below Detectable (BDL)') THEN DATE_ADD(hvl.repeat_vl_sample_date, INTERVAL 6 MONTH) "
 				
 				// --- PMTCT / PREGNANT & OTHER GENERAL CONDITIONS ---
 		        + "WHEN (fp.client_pmtct = 'Yes' AND fp.date_vl_sample_collected IS NOT NULL) AND (fp.viral_load_value < 1000 OR fp.vl_results = 'Below Detectable (BDL)') THEN DATE_ADD(fp.date_vl_sample_collected, INTERVAL 3 MONTH) "
-				
 		        + "WHEN (fp.client_pmtct = 'Yes' AND fp.date_vl_sample_collected IS NULL) THEN DATE_ADD(fp.encounter_datetime, INTERVAL 3 MONTH) "
-				
 		        + "WHEN (fp.client_pregnant = 'Yes' AND pfh.art_start_date IS NOT NULL) THEN fp.encounter_datetime "
 				
+				// Eligibity in 6 months from the ART START DAte
 		        + "WHEN pfh.art_start_date IS NOT NULL AND (hvl.repeat_vl_result_date IS NULL AND fp.date_vl_sample_collected IS NULL) THEN DATE_ADD(pfh.art_start_date, INTERVAL 6 MONTH) "
 				
 		        + "ELSE NULL " + "END " + "END, '%d-%m-%Y') AS eligibility_date " + "FROM ssemr_etl.mamba_dim_person p "
