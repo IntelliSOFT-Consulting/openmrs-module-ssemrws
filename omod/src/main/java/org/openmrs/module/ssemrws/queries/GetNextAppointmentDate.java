@@ -38,7 +38,7 @@ public class GetNextAppointmentDate {
 		// Query for the next upcoming appointment
 		String futureQuery = "select fp.start_date_time " + "from openmrs.patient_appointment fp "
 		        + "join openmrs.person p on fp.patient_id = p.person_id " + "where p.uuid = :patientUuid "
-		        + "and fp.start_date_time >= :now " + "order by fp.start_date_time asc";
+		        + "and fp.start_date_time >= :now " + "and fp.status <> 'Cancelled' " + "order by fp.start_date_time asc";
 		
 		List<Date> futureResults = entityManager.createNativeQuery(futureQuery).setParameter("patientUuid", patientUuid)
 		        .setParameter("now", now).getResultList();
@@ -48,18 +48,42 @@ public class GetNextAppointmentDate {
 		}
 		
 		// If no upcoming appointments, query for the most recent past appointment
-		String pastAppoinmentQuery = "select fp.start_date_time " + "from openmrs.patient_appointment fp "
+		String pastAppointmentQuery = "select fp.start_date_time " + "from openmrs.patient_appointment fp "
 		        + "join openmrs.person p on fp.patient_id = p.person_id " + "where p.uuid = :patientUuid "
-		        + "and fp.start_date_time < :now " + "order by fp.start_date_time desc";
+		        + "and fp.start_date_time < :now " + "and fp.status NOT IN ('Missed', 'Cancelled') "
+		        + "order by fp.start_date_time desc";
 		
-		List<Date> pastResults = entityManager.createNativeQuery(pastAppoinmentQuery)
+		List<Date> pastResults = entityManager.createNativeQuery(pastAppointmentQuery)
 		        .setParameter("patientUuid", patientUuid).setParameter("now", now).getResultList();
 		
 		if (pastResults != null && !pastResults.isEmpty()) {
 			return dateTimeFormatter.format(pastResults.get(0));
-		} else {
-			return "No Appointments Found";
 		}
+		
+		// Query for missed appointments
+		String missedAppointmentQuery = "select fp.start_date_time " + "from openmrs.patient_appointment fp "
+		        + "join openmrs.person p on fp.patient_id = p.person_id " + "where p.uuid = :patientUuid "
+		        + "and fp.start_date_time < :now " + "and fp.status = 'Missed' " + "order by fp.start_date_time desc";
+		
+		List<Date> missedResults = entityManager.createNativeQuery(missedAppointmentQuery)
+		        .setParameter("patientUuid", patientUuid).setParameter("now", now).getResultList();
+		
+		if (missedResults != null && !missedResults.isEmpty()) {
+			return "Appointment Missed: " + dateTimeFormatter.format(missedResults.get(0));
+		}
+       // Query for cancelled appointments
+		String cancelledAppointmentQuery = "select fp.start_date_time " + "from openmrs.patient_appointment fp "
+		        + "join openmrs.person p on fp.patient_id = p.person_id " + "where p.uuid = :patientUuid "
+		        + "and fp.status = 'Cancelled' " + "order by fp.start_date_time desc";
+		
+		List<Date> cancelledResults = entityManager.createNativeQuery(cancelledAppointmentQuery)
+		        .setParameter("patientUuid", patientUuid).getResultList();
+		
+		if (cancelledResults != null && !cancelledResults.isEmpty()) {
+			return "Appointment was cancelled";
+		}
+		
+		return "No Appointments Found";
 	}
 	
 	public String getNextAppointmentDateByUuid(String patientUuid) {
